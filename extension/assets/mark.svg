@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!--
+    The Quill mark.
+
+    One idea, resolved cleanly: a fountain-pen nib. An earlier draft also
+    carried the tail of a "Q" as a pun, but at 16px the two shapes merged into
+    a single blob, so the tail is gone. A nib alone is unambiguous, scales
+    down to a favicon, and names the product without a caption.
+
+    Geometry, on a 128 grid:
+      · squircle       superellipse, corner radius 22.37% of the side (iOS)
+      · shoulders      y=26, x 41..87 — flared wide so the silhouette reads as
+                       a pen rather than a leaf
+      · waist          the walls converge on a smooth curve, not a straight
+                       taper, which is what gives real nibs their shape
+      · tip            (64, 104) — a true point on the horizontal centre
+      · breather hole  r=7.5 at (64, 50)
+      · slit           2.4 wide from the hole into the taper, stopped well short
+                       of the point so the tip stays solid and legible
+  -->
+
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34343a" />
+      <stop offset="0.5" stop-color="#1b1b1d" />
+      <stop offset="1" stop-color="#08080a" />
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.13" />
+      <stop offset="0.42" stop-color="#ffffff" stop-opacity="0.02" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="metal" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#ffffff" />
+      <stop offset="0.46" stop-color="#f4f4f7" />
+      <stop offset="1" stop-color="#d6d6dc" />
+    </linearGradient>
+  </defs>
+
+  <rect width="128" height="128" rx="28.6" fill="url(#body)" />
+  <rect width="128" height="128" rx="28.6" fill="url(#sheen)" />
+
+  <path
+    d="M64 20
+       c13.4 0 23 4.4 23 12.2
+       c0 1.5-.4 3-.9 4.4
+       c-2.3 7.3-3.2 15-3.2 22.8
+       c0 17.9-6.6 34.4-18.9 44.6
+       c-12.3-10.2-18.9-26.7-18.9-44.6
+       c0-7.8-.9-15.5-3.2-22.8
+       c-.5-1.4-.9-2.9-.9-4.4
+       C41 24.4 50.6 20 64 20Z"
+    fill="url(#metal)"
+  />
+
+  <!--
+    Counter-shapes: the breather hole and the slit. Together they are the whole
+    reason the shape reads as a nib rather than a leaf, so they are the only
+    detail the mark carries — an earlier highlight stroke along the left wall
+    overshot the tip and read as damage, and was removed.
+  -->
+  <circle cx="64" cy="50" r="7.5" fill="#101012" />
+  <path d="M62.8 57.5h2.4v32h-2.4z" fill="#101012" />
+</svg>

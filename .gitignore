@@ -1,0 +1,23 @@
+# Build outputs
+extension/dist/
+web/dist/
+
+# Test and tooling scratch space
+.test-build/
+.e2e-build/
+.probe-build/
+.e2e-profile/
+.probe-profile/
+.icon-work/
+
+# Chrome for Testing, downloaded by `npm run browsers`
+chrome/
+.browser-cache/
+
+# Screenshots written by the end-to-end suite
+.shots/
+
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

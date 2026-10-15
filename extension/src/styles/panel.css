@@ -1,0 +1,886 @@
+/* ---------------------------------------------------------------------------
+ * The in-page panel
+ * ---------------------------------------------------------------------------
+ * Everything is scoped under a custom element (`quill-panel`) so no rule can
+ * leak into the host page, and the host page cannot leak into us. This is why
+ * the panel uses a shadow root: a job site's `* { box-sizing: content-box }`
+ * must not be able to break the panel's layout.
+ *
+ * Sizing: the panel is a fixed-width column docked to the right edge, 360px on
+ * desktop and a bottom sheet under 720px. Drag-to-move is supported on desktop
+ * and disabled on touch, where dragging a floating panel is hostile.
+ * ------------------------------------------------------------------------- */
+
+:host {
+  all: initial;
+  /* Re-declare what we need, because `all: initial` wipes inherited values. */
+  --q-panel-width: 23.5rem;
+  --q-panel-radius: 1.25rem;
+  font-family: var(--font-text, -apple-system, "SF Pro Text", "PingFang SC", sans-serif);
+  color-scheme: light dark;
+  z-index: 2147483000;
+  position: fixed;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* The host element itself must never intercept clicks. */
+* {
+  box-sizing: border-box;
+}
+
+.q-panel {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  width: var(--q-panel-width);
+  max-height: min(44rem, calc(100vh - 5rem));
+  border-radius: var(--q-panel-radius);
+  background: var(--surface-glass-strong);
+  -webkit-backdrop-filter: saturate(180%) blur(30px);
+  backdrop-filter: saturate(180%) blur(30px);
+  box-shadow:
+    0 0 0 0.5px var(--line),
+    0 1px 1px rgba(0, 0, 0, 0.03),
+    0 8px 24px -6px rgba(0, 0, 0, 0.12),
+    0 32px 64px -16px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  pointer-events: auto;
+  animation: q-panel-in 420ms cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.q-panel.q-dragging {
+  transition: none;
+  cursor: grabbing;
+}
+
+.q-panel.q-snapping {
+  transition:
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
+    left 320ms cubic-bezier(0.16, 1, 0.3, 1),
+    top 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes q-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes q-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* -------------------------------------------------------------------- header */
+
+.q-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0.75rem 0.75rem 1rem;
+  cursor: grab;
+  user-select: none;
+  flex: none;
+}
+
+.q-head-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 0.375rem;
+  background: var(--ink);
+  color: var(--bg);
+  flex: none;
+  --q-mark-counter: var(--ink);
+}
+
+.q-head-mark svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+}
+
+.q-head-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.016em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.q-head-sub {
+  font-size: 0.6875rem;
+  color: var(--ink-tertiary);
+  white-space: nowrap;
+}
+
+.q-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  margin-left: auto;
+}
+
+.q-hbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  border: none;
+  border-radius: 0.4375rem;
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.q-hbtn:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.q-hbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.q-hbtn svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+/* --------------------------------------------------------------------- body */
+
+.q-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 0.25rem 0.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.q-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.q-body::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* --------------------------------------------------------------------- hero */
+
+/**
+ * The summary card. This is the one place the panel is allowed to be visually
+ * loud: a big count, a progress arc, and the primary action.
+ */
+.q-hero {
+  position: relative;
+  margin: 0 0.5rem 0.75rem;
+  padding: 1rem;
+  border-radius: 0.875rem;
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 0.5px var(--line);
+  overflow: hidden;
+}
+
+/* A soft accent wash, echoing Apple's gradient heroes without the gradient. */
+.q-hero::before {
+  content: "";
+  position: absolute;
+  inset: -60% -30% auto auto;
+  width: 12rem;
+  height: 12rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-soft), transparent 70%);
+  pointer-events: none;
+}
+
+.q-hero-top {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.q-hero-count {
+  font-family: var(--font-num);
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.q-hero-of {
+  font-family: var(--font-num);
+  font-size: 0.875rem;
+  color: var(--ink-tertiary);
+  font-weight: 400;
+}
+
+.q-hero-label {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+}
+
+.q-hero-note {
+  position: relative;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 0.5px solid var(--line);
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/**
+ * The tally legend. A dot, a count, a label — the same reading order as the
+ * progress bar it explains, so the bar and the legend can be read together
+ * without re-scanning.
+ */
+.q-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.625rem;
+  list-style: none;
+}
+
+.q-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  color: var(--ink-secondary);
+}
+
+.q-legend-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  flex: none;
+  background: var(--line-strong);
+}
+
+.q-legend-dot[data-state="ready"] {
+  background: var(--green);
+}
+
+.q-legend-dot[data-state="review"] {
+  background: var(--accent);
+}
+
+.q-legend-dot[data-state="choice"] {
+  background: var(--orange);
+}
+
+.q-legend-dot[data-state="missing"] {
+  background: var(--line-strong);
+}
+
+.q-legend-count {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.q-hero-note-item {
+  display: flex;
+  gap: 0.375rem;
+  align-items: flex-start;
+}
+
+.q-hero-note-item svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  margin-top: 0.1875rem;
+  color: var(--ink-quaternary);
+}
+
+/* ------------------------------------------------------------------ progress */
+
+.q-bar {
+  display: flex;
+  gap: 0.1875rem;
+  margin-top: 0.625rem;
+}
+
+.q-bar-seg {
+  height: 0.1875rem;
+  border-radius: 99px;
+  flex: 1;
+  background: var(--bg-inset);
+  transition: background-color 260ms ease-out;
+}
+
+.q-bar-seg[data-state="ready"] {
+  background: var(--green);
+}
+
+.q-bar-seg[data-state="review"] {
+  background: var(--accent);
+}
+
+.q-bar-seg[data-state="choice"] {
+  background: var(--orange);
+}
+
+.q-bar-seg[data-state="missing"] {
+  background: var(--line-strong);
+}
+
+/* -------------------------------------------------------------------- lists */
+
+.q-section {
+  padding: 0 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.q-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  margin-bottom: 0.125rem;
+}
+
+.q-section-title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.q-section-count {
+  font-family: var(--font-num);
+  font-size: 0.6875rem;
+  color: var(--ink-quaternary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A row: label, value, evidence. */
+.q-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.125rem 0.5rem;
+  padding: 0.5rem 0.5rem 0.5625rem;
+  border-radius: 0.625rem;
+  transition: background-color 140ms ease-out;
+}
+
+.q-field:hover {
+  background: var(--bg-hover);
+}
+
+.q-field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+}
+
+.q-field-label-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.q-field-req {
+  color: var(--red);
+  font-size: 0.6875rem;
+  flex: none;
+}
+
+.q-field-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  color: var(--ink-quaternary);
+}
+
+.q-field-value {
+  grid-column: 1 / -1;
+  font-size: 0.8125rem;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  word-break: break-word;
+}
+
+.q-field-value.is-multiline {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.q-field-value.is-empty {
+  color: var(--ink-quaternary);
+  font-style: normal;
+}
+
+/* The evidence line: small, dim, with a leading rule so it reads as a citation. */
+.q-field-why {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3125rem;
+  margin-top: 0.1875rem;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--ink-tertiary);
+}
+
+.q-field-why svg {
+  width: 0.6875rem;
+  height: 0.6875rem;
+  flex: none;
+  margin-top: 0.0625rem;
+}
+
+.q-field-why-text {
+  min-width: 0;
+}
+
+.q-field-quote {
+  display: block;
+  margin-top: 0.125rem;
+  padding-left: 0.4375rem;
+  border-left: 1.5px solid var(--line);
+  color: var(--ink-quaternary);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+.q-field-caution {
+  grid-column: 1 / -1;
+  margin-top: 0.25rem;
+  font-size: 0.6875rem;
+  color: var(--orange);
+}
+
+/* Per-row actions appear on hover, keeping the resting state calm. */
+.q-field-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.375rem;
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+
+.q-field:hover .q-field-actions,
+.q-field:focus-within .q-field-actions {
+  opacity: 1;
+}
+
+/* Choice rows keep their actions visible — a decision must not be hidden. */
+.q-field[data-status="choice"] .q-field-actions,
+.q-field[data-status="missing"] .q-field-actions {
+  opacity: 1;
+}
+
+.q-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: var(--bg-inset);
+  color: var(--ink-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.q-mini:hover {
+  background: var(--bg-press);
+  color: var(--ink);
+}
+
+.q-mini-accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.q-mini-accent:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+}
+
+.q-mini svg {
+  width: 0.6875rem;
+  height: 0.6875rem;
+}
+
+/* Choice candidates. */
+.q-choices {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.375rem;
+}
+
+.q-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.4375rem;
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 0.5px var(--line-strong);
+  font-size: 0.75rem;
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    box-shadow 140ms ease-out;
+}
+
+.q-choice:hover {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.q-choice-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An inline editor for a missing or rejected value. */
+.q-edit {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+}
+
+.q-edit input,
+.q-edit textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 0.375rem 0.5625rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--ink);
+  resize: vertical;
+}
+
+.q-edit textarea {
+  min-height: 4.5rem;
+  line-height: 1.5;
+}
+
+.q-edit input:focus,
+.q-edit textarea:focus {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    0 0 0 3px var(--accent-soft);
+}
+
+/* -------------------------------------------------------------------- footer */
+
+.q-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 0.5px solid var(--line);
+  background: var(--surface-glass);
+}
+
+.q-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  flex: 1;
+  height: 2.125rem;
+  padding: 0 1rem;
+  border: none;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: -0.008em;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  transition:
+    background-color 140ms ease-out,
+    transform 90ms ease-out,
+    opacity 140ms ease-out;
+}
+
+.q-cta:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.q-cta:active:not(:disabled) {
+  transform: scale(0.978);
+}
+
+.q-cta:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.q-cta svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+}
+
+.q-cta-ghost {
+  flex: none;
+  background: transparent;
+  color: var(--ink-secondary);
+  box-shadow: none;
+}
+
+.q-cta-ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.q-foot-note {
+  font-size: 0.6875rem;
+  color: var(--ink-tertiary);
+  text-align: center;
+  flex: 1;
+}
+
+/* --------------------------------------------------------------- collapsed */
+
+/**
+ * The collapsed pill. It should read as a small piece of system UI, not as a
+ * widget someone injected into the page.
+ */
+.q-pill {
+  position: fixed;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 0.875rem 0 0.625rem;
+  border: none;
+  border-radius: 99px;
+  background: var(--surface-glass-strong);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow:
+    0 0 0 0.5px var(--line),
+    0 4px 12px -2px rgba(0, 0, 0, 0.12),
+    0 12px 28px -8px rgba(0, 0, 0, 0.16);
+  color: var(--ink);
+  font-family: var(--font-text);
+  cursor: grab;
+  pointer-events: auto;
+  animation: q-panel-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    box-shadow 200ms ease-out,
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.q-pill:hover {
+  box-shadow:
+    0 0 0 0.5px var(--line-strong),
+    0 6px 16px -2px rgba(0, 0, 0, 0.16),
+    0 16px 36px -10px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
+}
+
+.q-pill:active {
+  transform: scale(0.98);
+}
+
+.q-pill-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.3125rem;
+  background: var(--ink);
+  color: var(--bg);
+  flex: none;
+  --q-mark-counter: var(--ink);
+}
+
+.q-pill-mark svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.q-pill-text {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: -0.008em;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ notice */
+
+/* A transient message inside the panel ("已填写 12 项"). */
+.q-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0.5rem 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.625rem;
+  background: var(--bg-inset);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--ink-secondary);
+}
+
+.q-notice svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+  flex: none;
+  margin-top: 0.125rem;
+}
+
+.q-notice[data-tone="success"] {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.q-notice[data-tone="warning"] {
+  background: var(--orange-soft);
+  color: var(--orange);
+}
+
+.q-notice[data-tone="error"] {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* ------------------------------------------------------------------ motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .q-panel,
+  .q-pill {
+    animation: none;
+  }
+  .q-panel.q-snapping {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------ narrow */
+
+/**
+ * On a phone the panel becomes a bottom sheet: full width, docked, and not
+ * draggable. A floating 360px card on a 390px screen is unusable.
+ */
+@media (max-width: 720px) {
+  .q-panel {
+    left: 0 !important;
+    right: 0;
+    top: auto !important;
+    bottom: 0;
+    width: 100%;
+    max-height: min(80vh, 42rem);
+    border-radius: 1.25rem 1.25rem 0 0;
+    animation: q-sheet-in 380ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .q-head {
+    cursor: default;
+  }
+
+  /* A grabber, because a sheet should advertise that it can be dismissed. */
+  .q-head::before {
+    content: "";
+    position: absolute;
+    top: 0.375rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2.25rem;
+    height: 0.25rem;
+    border-radius: 99px;
+    background: var(--line-strong);
+  }
+
+  .q-head {
+    padding-top: 1.125rem;
+  }
+
+  .q-pill {
+    left: 0.75rem !important;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    top: auto !important;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  @keyframes q-sheet-in {
+    from {
+      opacity: 0;
+      transform: translateY(1.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* Extremely small screens: allow the sheet to use more of the viewport. */
+@media (max-width: 400px) {
+  .q-panel {
+    max-height: 88vh;
+  }
+}

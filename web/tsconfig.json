@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "types": ["vite/client", "node", "chrome"],
+    "paths": {
+      "@quill/core": ["../packages/core/src/index.ts"],
+      "@quill/core/*": ["../packages/core/src/*"],
+      "@quill/design/*": ["../packages/design/*"]
+    },
+    "baseUrl": "."
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "../packages/core/src/**/*.ts"]
+}

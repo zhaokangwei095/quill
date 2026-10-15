@@ -1,0 +1,650 @@
+/* ---------------------------------------------------------------------------
+ * Quill Design Tokens
+ * ---------------------------------------------------------------------------
+ * Derived from measurements taken from apple.com's shipped stylesheets
+ * (global header, homepage, product pages) plus Apple's published system
+ * colour values. Values that were read directly from Apple's CSS are marked
+ * with a source note; values that were reconstructed are marked approximate.
+ *
+ * The intent is a *material* system, not a skin: translucent layers that sit
+ * on top of real content, hairline rules instead of borders, and one accent
+ * colour used sparingly.
+ * ------------------------------------------------------------------------- */
+
+/*
+ * The tokens are declared on `:root` for normal documents and on `:host` for the
+ * in-page panel, which lives in a shadow root where `:root` would refer to the
+ * *document* root and its custom properties would not reach the panel.
+ *
+ * The two selectors are written as separate rules on purpose. An earlier version
+ * combined them as `:root, :host`, and the CSS bundler used by the web build
+ * dropped the entire block — every token silently became an empty string, so the
+ * workbench rendered unstyled. Splitting them keeps the declarations intact
+ * through minification.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* -- Type ---------------------------------------------------------------
+   * Apple ships SF Pro Display for >=20px and SF Pro Text below it, with a
+   * locale cascade (SF Pro SC / PingFang SC for zh-Hans). We mirror that
+   * cascade so Chinese webfont-less rendering still looks native on macOS,
+   * iOS and Windows. Source: apple.com font-family declarations.
+   */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro SC",
+    "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Helvetica Neue", "Segoe UI", Roboto, system-ui,
+    sans-serif;
+  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro SC",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Helvetica Neue", "Segoe UI", Roboto, system-ui, sans-serif;
+  /* Numerals for ledgers, dates and match scores. Tabular by default. */
+  --font-num: "SF Mono", ui-monospace, "SFMono-Regular", "JetBrains Mono",
+    "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* Sizes follow Apple's own ramp, reduced to a 9-step scale. Tracking is
+   * negative at display sizes and slightly positive at caption sizes, which
+   * is exactly what apple.com does (-.022em … +.012em). */
+  --text-display: 3.5rem; /* 56 */
+  --text-h1: 3rem; /* 48 */
+  --text-h2: 2.5rem; /* 40 */
+  --text-h3: 2rem; /* 32 */
+  --text-h4: 1.5rem; /* 24 */
+  --text-title: 1.3125rem; /* 21 */
+  --text-lead: 1.1875rem; /* 19 */
+  --text-body: 1.0625rem; /* 17 - Apple's body size */
+  --text-sub: 0.875rem; /* 14 */
+  --text-cap: 0.75rem; /* 12 */
+  --text-micro: 0.6875rem; /* 11 */
+
+  --leading-display: 1.05;
+  --leading-h1: 1.08;
+  --leading-h2: 1.1;
+  --leading-h3: 1.125;
+  --leading-h4: 1.17;
+  --leading-title: 1.19;
+  --leading-lead: 1.21;
+  --leading-body: 1.47;
+  --leading-sub: 1.43;
+  --leading-cap: 1.34;
+  --leading-micro: 1.36;
+
+  --tracking-display: -0.022em;
+  --tracking-h1: -0.01em;
+  --tracking-h2: -0.002em;
+  --tracking-h3: 0.002em;
+  --tracking-h4: 0.007em;
+  --tracking-title: 0.009em;
+  --tracking-lead: 0.011em;
+  --tracking-body: -0.022em;
+  --tracking-sub: -0.016em;
+  --tracking-cap: -0.01em;
+  --tracking-micro: 0.006em;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* -- Space -------------------------------------------------------------
+   * A 4px grid with the rhythm steps Apple actually uses: tight inside a
+   * control (8/12), comfortable inside a card (16/24), generous between
+   * sections (48/64/96). */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.25rem;
+  --s-6: 1.5rem;
+  --s-8: 2rem;
+  --s-10: 2.5rem;
+  --s-12: 3rem;
+  --s-16: 4rem;
+  --s-20: 5rem;
+  --s-24: 6rem;
+
+  /* -- Radius ------------------------------------------------------------
+   * Apple mixes a relaxed card radius with a full pill for controls
+   * (border-radius:980px measured in apple.com CSS). */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-2xl: 28px;
+  --r-pill: 980px;
+
+  /* -- Motion ------------------------------------------------------------
+   * cubic-bezier(0.66,0,0.1,1) was measured in apple.com product CSS; the
+   * expo-out curve is the standard decelerating entrance. */
+  --ease-glide: cubic-bezier(0.66, 0, 0.1, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --d-instant: 90ms;
+  --d-fast: 160ms;
+  --d-base: 260ms;
+  --d-slow: 420ms;
+  --d-reveal: 700ms;
+
+  /* -- Accent ------------------------------------------------------------
+   * #0071e3 / #0077ed / #006edb are lifted verbatim from apple.com's button
+   * variables (--sk-button-background). #2997ff is Apple's dark-mode link. */
+  --accent: #0071e3;
+  --accent-hover: #0077ed;
+  --accent-active: #006edb;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(0, 113, 227, 0.1);
+  --accent-ring: rgba(0, 113, 227, 0.42);
+  --accent-bright: #2997ff;
+
+  /* -- Semantic (Apple system colours, light variants) -------------------- */
+  --green: #1d9e4b;
+  --green-soft: rgba(29, 158, 75, 0.12);
+  --red: #e02d1b;
+  --red-soft: rgba(224, 45, 27, 0.12);
+  --orange: #c25f00;
+  --orange-soft: rgba(194, 95, 0, 0.12);
+  --yellow: #a88700;
+  --yellow-soft: rgba(168, 135, 0, 0.14);
+  --purple: #8944ab;
+  --purple-soft: rgba(137, 68, 171, 0.12);
+  --teal: #0f7f95;
+  --teal-soft: rgba(15, 127, 149, 0.12);
+
+  /* -- Surfaces (light) ---------------------------------------------------
+   * Apple's page background is #fff with #f5f5f7 for grouped sections and
+   * #fafafc for the navigation material. Never pure #000 on dark. */
+  --bg: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #f5f5f7;
+  --bg-grouped: #fafafc;
+  --bg-inset: rgba(0, 0, 0, 0.032);
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-press: rgba(0, 0, 0, 0.07);
+
+  --surface-glass: rgba(250, 250, 252, 0.8); /* apple nav material */
+  --surface-glass-strong: rgba(250, 250, 252, 0.92);
+  --surface-glass-dark: rgba(22, 22, 23, 0.8); /* dark nav material */
+  --surface-scrim: rgba(0, 0, 0, 0.32);
+  --material-bar: saturate(180%) blur(20px); /* measured on apple.com */
+  --material-thick: saturate(180%) blur(30px);
+  --material-thin: saturate(160%) blur(12px);
+
+  /* -- Ink --------------------------------------------------------------- */
+  --ink: #1d1d1f; /* Apple's near-black body colour */
+  --ink-strong: #000000;
+  --ink-secondary: #6e6e73;
+  --ink-tertiary: #86868b;
+  --ink-quaternary: #a1a1a6;
+  --ink-inverse: #f5f5f7;
+
+  /* -- Lines -------------------------------------------------------------
+   * Apple uses hairlines at 0.5px (device pixels) and separators around 8%
+   * black. `--hairline` collapses to 1px on non-retina displays. */
+  --line: rgba(0, 0, 0, 0.1);
+  --line-strong: rgba(0, 0, 0, 0.18);
+  --line-soft: rgba(0, 0, 0, 0.06);
+  --line-inverse: rgba(255, 255, 255, 0.14);
+  --hairline-w: 0.5px;
+
+  /* -- Elevation ---------------------------------------------------------
+   * Apple leans on a hairline outline plus a soft, wide, low-opacity shadow.
+   * The inset highlight on the top edge is what sells the "lit surface". */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 10px 30px -6px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 24px 64px -12px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  --shadow-pop: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.04),
+    0 8px 16px -4px rgba(0, 0, 0, 0.1), 0 24px 48px -12px rgba(0, 0, 0, 0.14);
+  --gloss: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  /* -- Layout ------------------------------------------------------------ */
+  --rail: 4.5rem;
+  --sidebar: 16.5rem;
+  --panel: 24rem;
+  --measure: 68ch;
+  --content-max: 78rem;
+  --z-sticky: 100;
+  --z-float: 300;
+  --z-scrim: 400;
+  --z-modal: 500;
+  --z-toast: 600;
+  --z-tip: 700;
+}
+
+/*
+ * The same declarations for the shadow root, where custom properties cannot
+ * inherit from the document.
+ *
+ * The duplication is deliberate and generated: the panel is styled by a
+ * stylesheet bundled at build time, so there is no cascade through which the
+ * document's variables could reach it.
+ */
+:host {
+  color-scheme: light dark;
+
+  /* -- Type ---------------------------------------------------------------
+   * Apple ships SF Pro Display for >=20px and SF Pro Text below it, with a
+   * locale cascade (SF Pro SC / PingFang SC for zh-Hans). We mirror that
+   * cascade so Chinese webfont-less rendering still looks native on macOS,
+   * iOS and Windows. Source: apple.com font-family declarations.
+   */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro SC",
+    "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Helvetica Neue", "Segoe UI", Roboto, system-ui,
+    sans-serif;
+  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro SC",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Helvetica Neue", "Segoe UI", Roboto, system-ui, sans-serif;
+  /* Numerals for ledgers, dates and match scores. Tabular by default. */
+  --font-num: "SF Mono", ui-monospace, "SFMono-Regular", "JetBrains Mono",
+    "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* Sizes follow Apple's own ramp, reduced to a 9-step scale. Tracking is
+   * negative at display sizes and slightly positive at caption sizes, which
+   * is exactly what apple.com does (-.022em … +.012em). */
+  --text-display: 3.5rem; /* 56 */
+  --text-h1: 3rem; /* 48 */
+  --text-h2: 2.5rem; /* 40 */
+  --text-h3: 2rem; /* 32 */
+  --text-h4: 1.5rem; /* 24 */
+  --text-title: 1.3125rem; /* 21 */
+  --text-lead: 1.1875rem; /* 19 */
+  --text-body: 1.0625rem; /* 17 - Apple's body size */
+  --text-sub: 0.875rem; /* 14 */
+  --text-cap: 0.75rem; /* 12 */
+  --text-micro: 0.6875rem; /* 11 */
+
+  --leading-display: 1.05;
+  --leading-h1: 1.08;
+  --leading-h2: 1.1;
+  --leading-h3: 1.125;
+  --leading-h4: 1.17;
+  --leading-title: 1.19;
+  --leading-lead: 1.21;
+  --leading-body: 1.47;
+  --leading-sub: 1.43;
+  --leading-cap: 1.34;
+  --leading-micro: 1.36;
+
+  --tracking-display: -0.022em;
+  --tracking-h1: -0.01em;
+  --tracking-h2: -0.002em;
+  --tracking-h3: 0.002em;
+  --tracking-h4: 0.007em;
+  --tracking-title: 0.009em;
+  --tracking-lead: 0.011em;
+  --tracking-body: -0.022em;
+  --tracking-sub: -0.016em;
+  --tracking-cap: -0.01em;
+  --tracking-micro: 0.006em;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* -- Space -------------------------------------------------------------
+   * A 4px grid with the rhythm steps Apple actually uses: tight inside a
+   * control (8/12), comfortable inside a card (16/24), generous between
+   * sections (48/64/96). */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.25rem;
+  --s-6: 1.5rem;
+  --s-8: 2rem;
+  --s-10: 2.5rem;
+  --s-12: 3rem;
+  --s-16: 4rem;
+  --s-20: 5rem;
+  --s-24: 6rem;
+
+  /* -- Radius ------------------------------------------------------------
+   * Apple mixes a relaxed card radius with a full pill for controls
+   * (border-radius:980px measured in apple.com CSS). */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-2xl: 28px;
+  --r-pill: 980px;
+
+  /* -- Motion ------------------------------------------------------------
+   * cubic-bezier(0.66,0,0.1,1) was measured in apple.com product CSS; the
+   * expo-out curve is the standard decelerating entrance. */
+  --ease-glide: cubic-bezier(0.66, 0, 0.1, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --d-instant: 90ms;
+  --d-fast: 160ms;
+  --d-base: 260ms;
+  --d-slow: 420ms;
+  --d-reveal: 700ms;
+
+  /* -- Accent ------------------------------------------------------------
+   * #0071e3 / #0077ed / #006edb are lifted verbatim from apple.com's button
+   * variables (--sk-button-background). #2997ff is Apple's dark-mode link. */
+  --accent: #0071e3;
+  --accent-hover: #0077ed;
+  --accent-active: #006edb;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(0, 113, 227, 0.1);
+  --accent-ring: rgba(0, 113, 227, 0.42);
+  --accent-bright: #2997ff;
+
+  /* -- Semantic (Apple system colours, light variants) -------------------- */
+  --green: #1d9e4b;
+  --green-soft: rgba(29, 158, 75, 0.12);
+  --red: #e02d1b;
+  --red-soft: rgba(224, 45, 27, 0.12);
+  --orange: #c25f00;
+  --orange-soft: rgba(194, 95, 0, 0.12);
+  --yellow: #a88700;
+  --yellow-soft: rgba(168, 135, 0, 0.14);
+  --purple: #8944ab;
+  --purple-soft: rgba(137, 68, 171, 0.12);
+  --teal: #0f7f95;
+  --teal-soft: rgba(15, 127, 149, 0.12);
+
+  /* -- Surfaces (light) ---------------------------------------------------
+   * Apple's page background is #fff with #f5f5f7 for grouped sections and
+   * #fafafc for the navigation material. Never pure #000 on dark. */
+  --bg: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #f5f5f7;
+  --bg-grouped: #fafafc;
+  --bg-inset: rgba(0, 0, 0, 0.032);
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-press: rgba(0, 0, 0, 0.07);
+
+  --surface-glass: rgba(250, 250, 252, 0.8); /* apple nav material */
+  --surface-glass-strong: rgba(250, 250, 252, 0.92);
+  --surface-glass-dark: rgba(22, 22, 23, 0.8); /* dark nav material */
+  --surface-scrim: rgba(0, 0, 0, 0.32);
+  --material-bar: saturate(180%) blur(20px); /* measured on apple.com */
+  --material-thick: saturate(180%) blur(30px);
+  --material-thin: saturate(160%) blur(12px);
+
+  /* -- Ink --------------------------------------------------------------- */
+  --ink: #1d1d1f; /* Apple's near-black body colour */
+  --ink-strong: #000000;
+  --ink-secondary: #6e6e73;
+  --ink-tertiary: #86868b;
+  --ink-quaternary: #a1a1a6;
+  --ink-inverse: #f5f5f7;
+
+  /* -- Lines -------------------------------------------------------------
+   * Apple uses hairlines at 0.5px (device pixels) and separators around 8%
+   * black. `--hairline` collapses to 1px on non-retina displays. */
+  --line: rgba(0, 0, 0, 0.1);
+  --line-strong: rgba(0, 0, 0, 0.18);
+  --line-soft: rgba(0, 0, 0, 0.06);
+  --line-inverse: rgba(255, 255, 255, 0.14);
+  --hairline-w: 0.5px;
+
+  /* -- Elevation ---------------------------------------------------------
+   * Apple leans on a hairline outline plus a soft, wide, low-opacity shadow.
+   * The inset highlight on the top edge is what sells the "lit surface". */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 10px 30px -6px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 24px 64px -12px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  --shadow-pop: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.04),
+    0 8px 16px -4px rgba(0, 0, 0, 0.1), 0 24px 48px -12px rgba(0, 0, 0, 0.14);
+  --gloss: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  /* -- Layout ------------------------------------------------------------ */
+  --rail: 4.5rem;
+  --sidebar: 16.5rem;
+  --panel: 24rem;
+  --measure: 68ch;
+  --content-max: 78rem;
+  --z-sticky: 100;
+  --z-float: 300;
+  --z-scrim: 400;
+  --z-modal: 500;
+  --z-toast: 600;
+  --z-tip: 700;
+}
+
+/* ---------------------------------------------------------------------------
+ * Dark appearance
+ * ---------------------------------------------------------------------------
+ * Not an inversion. Apple's dark surfaces are #000 for page chrome with
+ * elevated layers lightening toward #1d1d1f / #2c2c2e, accents desaturate,
+ * and text opacity drops instead of hue shifting.
+ * ------------------------------------------------------------------------- */
+:root[data-appearance="dark"] {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --bg-elevated: #1c1c1e;
+  --bg-sunken: #0a0a0b;
+  --bg-grouped: #0f0f10;
+  --bg-inset: rgba(255, 255, 255, 0.06);
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --bg-press: rgba(255, 255, 255, 0.12);
+
+  --surface-glass: rgba(22, 22, 23, 0.8);
+  --surface-glass-strong: rgba(22, 22, 23, 0.9);
+  --surface-glass-dark: rgba(22, 22, 23, 0.8);
+  --surface-scrim: rgba(0, 0, 0, 0.5);
+
+  --ink: #f5f5f7;
+  --ink-strong: #ffffff;
+  --ink-secondary: #a1a1a6;
+  --ink-tertiary: #86868b;
+  --ink-quaternary: #6e6e73;
+  --ink-inverse: #1d1d1f;
+
+  --line: rgba(255, 255, 255, 0.14);
+  --line-strong: rgba(255, 255, 255, 0.24);
+  --line-soft: rgba(255, 255, 255, 0.08);
+  --line-inverse: rgba(0, 0, 0, 0.4);
+
+  --accent: #0a84ff;
+  --accent-hover: #339cff;
+  --accent-active: #0071e3;
+  --accent-soft: rgba(10, 132, 255, 0.16);
+  --accent-ring: rgba(10, 132, 255, 0.5);
+  --accent-bright: #2997ff;
+
+  --green: #30d158;
+  --green-soft: rgba(48, 209, 88, 0.16);
+  --red: #ff453a;
+  --red-soft: rgba(255, 69, 58, 0.18);
+  --orange: #ff9f0a;
+  --orange-soft: rgba(255, 159, 10, 0.16);
+  --yellow: #ffd60a;
+  --yellow-soft: rgba(255, 214, 10, 0.16);
+  --purple: #bf5af2;
+  --purple-soft: rgba(191, 90, 242, 0.18);
+  --teal: #40c8e0;
+  --teal-soft: rgba(64, 200, 224, 0.16);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+  --shadow-md: 0 12px 34px -8px rgba(0, 0, 0, 0.7), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --shadow-lg: 0 28px 70px -14px rgba(0, 0, 0, 0.8), 0 0 0 0.5px rgba(255, 255, 255, 0.09);
+  --shadow-pop: 0 0 0 0.5px rgba(255, 255, 255, 0.09), 0 2px 6px rgba(0, 0, 0, 0.5),
+    0 16px 32px -8px rgba(0, 0, 0, 0.65), 0 44px 80px -20px rgba(0, 0, 0, 0.8);
+  --gloss: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+
+/*
+ * The same dark palette for the panel's shadow root. Chrome does not let an
+ * `all: initial` host inherit custom properties from the document, so the panel
+ * re-declares them; the selectors are kept separate from the `:root` rules for
+ * the bundler reason documented at the top of the file.
+ */
+:host([data-appearance="dark"]) {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --bg-elevated: #1c1c1e;
+  --bg-sunken: #0a0a0b;
+  --bg-grouped: #0f0f10;
+  --bg-inset: rgba(255, 255, 255, 0.06);
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --bg-press: rgba(255, 255, 255, 0.12);
+
+  --surface-glass: rgba(22, 22, 23, 0.8);
+  --surface-glass-strong: rgba(22, 22, 23, 0.9);
+  --surface-glass-dark: rgba(22, 22, 23, 0.8);
+  --surface-scrim: rgba(0, 0, 0, 0.5);
+
+  --ink: #f5f5f7;
+  --ink-strong: #ffffff;
+  --ink-secondary: #a1a1a6;
+  --ink-tertiary: #86868b;
+  --ink-quaternary: #6e6e73;
+  --ink-inverse: #1d1d1f;
+
+  --line: rgba(255, 255, 255, 0.14);
+  --line-strong: rgba(255, 255, 255, 0.24);
+  --line-soft: rgba(255, 255, 255, 0.08);
+  --line-inverse: rgba(0, 0, 0, 0.4);
+
+  --accent: #0a84ff;
+  --accent-hover: #339cff;
+  --accent-active: #0071e3;
+  --accent-soft: rgba(10, 132, 255, 0.16);
+  --accent-ring: rgba(10, 132, 255, 0.5);
+  --accent-bright: #2997ff;
+
+  --green: #30d158;
+  --green-soft: rgba(48, 209, 88, 0.16);
+  --red: #ff453a;
+  --red-soft: rgba(255, 69, 58, 0.18);
+  --orange: #ff9f0a;
+  --orange-soft: rgba(255, 159, 10, 0.16);
+  --yellow: #ffd60a;
+  --yellow-soft: rgba(255, 214, 10, 0.16);
+  --purple: #bf5af2;
+  --purple-soft: rgba(191, 90, 242, 0.18);
+  --teal: #40c8e0;
+  --teal-soft: rgba(64, 200, 224, 0.16);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+  --shadow-md: 0 12px 34px -8px rgba(0, 0, 0, 0.7), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --shadow-lg: 0 28px 70px -14px rgba(0, 0, 0, 0.8), 0 0 0 0.5px rgba(255, 255, 255, 0.09);
+  --shadow-pop: 0 0 0 0.5px rgba(255, 255, 255, 0.09), 0 2px 6px rgba(0, 0, 0, 0.5),
+    0 16px 32px -8px rgba(0, 0, 0, 0.65), 0 44px 80px -20px rgba(0, 0, 0, 0.8);
+  --gloss: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-appearance="light"]) {
+    color-scheme: dark;
+
+    --bg: #000000;
+    --bg-elevated: #1c1c1e;
+    --bg-sunken: #0a0a0b;
+    --bg-grouped: #0f0f10;
+    --bg-inset: rgba(255, 255, 255, 0.06);
+    --bg-hover: rgba(255, 255, 255, 0.07);
+    --bg-press: rgba(255, 255, 255, 0.12);
+
+    --surface-glass: rgba(22, 22, 23, 0.8);
+    --surface-glass-strong: rgba(22, 22, 23, 0.9);
+    --surface-scrim: rgba(0, 0, 0, 0.5);
+
+    --ink: #f5f5f7;
+    --ink-strong: #ffffff;
+    --ink-secondary: #a1a1a6;
+    --ink-tertiary: #86868b;
+    --ink-quaternary: #6e6e73;
+    --ink-inverse: #1d1d1f;
+
+    --line: rgba(255, 255, 255, 0.14);
+    --line-strong: rgba(255, 255, 255, 0.24);
+    --line-soft: rgba(255, 255, 255, 0.08);
+
+    --accent: #0a84ff;
+    --accent-hover: #339cff;
+    --accent-active: #0071e3;
+    --accent-soft: rgba(10, 132, 255, 0.16);
+    --accent-ring: rgba(10, 132, 255, 0.5);
+
+    --green: #30d158;
+    --green-soft: rgba(48, 209, 88, 0.16);
+    --red: #ff453a;
+    --red-soft: rgba(255, 69, 58, 0.18);
+    --orange: #ff9f0a;
+    --orange-soft: rgba(255, 159, 10, 0.16);
+    --yellow: #ffd60a;
+    --yellow-soft: rgba(255, 214, 10, 0.16);
+    --purple: #bf5af2;
+    --purple-soft: rgba(191, 90, 242, 0.18);
+    --teal: #40c8e0;
+    --teal-soft: rgba(64, 200, 224, 0.16);
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+    --shadow-md: 0 12px 34px -8px rgba(0, 0, 0, 0.7), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+    --shadow-lg: 0 28px 70px -14px rgba(0, 0, 0, 0.8), 0 0 0 0.5px rgba(255, 255, 255, 0.09);
+    --shadow-pop: 0 0 0 0.5px rgba(255, 255, 255, 0.09), 0 2px 6px rgba(0, 0, 0, 0.5),
+      0 16px 32px -8px rgba(0, 0, 0, 0.65), 0 44px 80px -20px rgba(0, 0, 0, 0.8);
+    --gloss: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  }
+
+  :host(:not([data-appearance="light"])) {
+    color-scheme: dark;
+
+    --bg: #000000;
+    --bg-elevated: #1c1c1e;
+    --bg-sunken: #0a0a0b;
+    --bg-grouped: #0f0f10;
+    --bg-inset: rgba(255, 255, 255, 0.06);
+    --bg-hover: rgba(255, 255, 255, 0.07);
+    --bg-press: rgba(255, 255, 255, 0.12);
+
+    --surface-glass: rgba(22, 22, 23, 0.8);
+    --surface-glass-strong: rgba(22, 22, 23, 0.9);
+    --surface-scrim: rgba(0, 0, 0, 0.5);
+
+    --ink: #f5f5f7;
+    --ink-strong: #ffffff;
+    --ink-secondary: #a1a1a6;
+    --ink-tertiary: #86868b;
+    --ink-quaternary: #6e6e73;
+    --ink-inverse: #1d1d1f;
+
+    --line: rgba(255, 255, 255, 0.14);
+    --line-strong: rgba(255, 255, 255, 0.24);
+    --line-soft: rgba(255, 255, 255, 0.08);
+
+    --accent: #0a84ff;
+    --accent-hover: #339cff;
+    --accent-active: #0071e3;
+    --accent-soft: rgba(10, 132, 255, 0.16);
+    --accent-ring: rgba(10, 132, 255, 0.5);
+
+    --green: #30d158;
+    --green-soft: rgba(48, 209, 88, 0.16);
+    --red: #ff453a;
+    --red-soft: rgba(255, 69, 58, 0.18);
+    --orange: #ff9f0a;
+    --orange-soft: rgba(255, 159, 10, 0.16);
+    --yellow: #ffd60a;
+    --yellow-soft: rgba(255, 214, 10, 0.16);
+    --purple: #bf5af2;
+    --purple-soft: rgba(191, 90, 242, 0.18);
+    --teal: #40c8e0;
+    --teal-soft: rgba(64, 200, 224, 0.16);
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+    --shadow-md: 0 12px 34px -8px rgba(0, 0, 0, 0.7), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+    --shadow-lg: 0 28px 70px -14px rgba(0, 0, 0, 0.8), 0 0 0 0.5px rgba(255, 255, 255, 0.09);
+    --shadow-pop: 0 0 0 0.5px rgba(255, 255, 255, 0.09), 0 2px 6px rgba(0, 0, 0, 0.5),
+      0 16px 32px -8px rgba(0, 0, 0, 0.65), 0 44px 80px -20px rgba(0, 0, 0, 0.8);
+    --gloss: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  }
+}

@@ -1,0 +1,405 @@
+/* ---------------------------------------------------------------------------
+ * Popup, options and welcome surfaces.
+ * ---------------------------------------------------------------------------
+ * These are real extension pages, so `:root` applies and the tokens from the
+ * shared sheet are available without any shadow-root gymnastics.
+ * ------------------------------------------------------------------------- */
+
+@import "../../../packages/design/base.css";
+
+body {
+  background: var(--bg-grouped);
+}
+
+/* ------------------------------------------------------------------- popup */
+
+body.q-popup {
+  width: 22.5rem;
+  max-height: 36rem;
+  overflow: hidden;
+}
+
+.q-popup-root {
+  display: flex;
+  flex-direction: column;
+  max-height: 36rem;
+}
+
+.q-popup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: var(--hairline-w) solid var(--line);
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: var(--material-bar);
+  backdrop-filter: var(--material-bar);
+}
+
+.q-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.q-brand-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--r-xs);
+  background: var(--ink);
+  color: var(--bg);
+  flex: none;
+  /*
+   * The mark draws its nib with `currentColor` and its breather hole with a
+   * separate variable, because the hole must show the surface *behind* the mark.
+   * Defaulting that variable to white made the hole invisible against the white
+   * nib; naming the mark's own background here keeps it correct on every tile.
+   */
+  --q-mark-counter: var(--ink);
+}
+
+.q-brand-mark svg {
+  width: 0.9375rem;
+  height: 0.9375rem;
+}
+
+.q-brand-name {
+  font-size: var(--text-sub);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-sub);
+}
+
+.q-popup-body {
+  padding: var(--s-3);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.q-popup-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-top: var(--hairline-w) solid var(--line);
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: var(--material-bar);
+  backdrop-filter: var(--material-bar);
+}
+
+/* --------------------------------------------------------------- stat strip */
+
+.q-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--hairline-w);
+  background: var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  margin-bottom: var(--s-3);
+}
+
+.q-stat {
+  background: var(--bg-elevated);
+  padding: var(--s-3) var(--s-2);
+  text-align: center;
+}
+
+.q-stat-value {
+  font-family: var(--font-num);
+  font-size: var(--text-h4);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.q-stat-label {
+  margin-top: var(--s-1);
+  font-size: var(--text-micro);
+  color: var(--ink-tertiary);
+  letter-spacing: 0.02em;
+}
+
+/* --------------------------------------------------------------- list rows */
+
+.q-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.q-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-md);
+  text-align: left;
+  width: 100%;
+  transition: background-color var(--d-fast) var(--ease-out);
+}
+
+button.q-item:hover {
+  background: var(--bg-hover);
+}
+
+.q-item-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--r-sm);
+  background: var(--bg-inset);
+  color: var(--ink-secondary);
+  flex: none;
+  font-size: var(--text-cap);
+  font-weight: var(--weight-semibold);
+  /*
+   * The mark is a flex container, so an inline `<svg>` child would be treated as
+   * an inline box and its baseline would push it off-centre. Forcing the child to
+   * `display: block` is what actually centres the icons.
+   */
+  line-height: 0;
+}
+
+.q-item-mark svg,
+.q-item-trailing svg {
+  display: block;
+}
+
+.q-item-mark[data-tone="accent"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.q-item-mark[data-tone="green"] {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.q-item-mark[data-tone="orange"] {
+  background: var(--orange-soft);
+  color: var(--orange);
+}
+
+.q-item-mark[data-tone="purple"] {
+  background: var(--purple-soft);
+  color: var(--purple);
+}
+
+.q-item-body {
+  flex: 1;
+  min-width: 0;
+  /*
+   * The title and meta are separate lines. Without `display: flex` they collapse
+   * into one run — "工作台简历、岗位润色、投递台账" — because a `<span>` is inline
+   * and `text-overflow` cannot apply to it.
+   */
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+}
+
+.q-item-title {
+  display: block;
+  font-size: var(--text-sub);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-sub);
+  color: var(--ink);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.q-item-meta {
+  display: block;
+  font-size: var(--text-cap);
+  color: var(--ink-tertiary);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.q-item-trailing {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  color: var(--ink-quaternary);
+}
+
+/* -------------------------------------------------------------- settings */
+
+.q-setting {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-4);
+  padding: var(--s-4);
+}
+
+.q-setting-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.q-setting-title {
+  font-size: var(--text-sub);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-sub);
+}
+
+.q-setting-desc {
+  margin-top: var(--s-1);
+  font-size: var(--text-cap);
+  line-height: var(--leading-cap);
+  color: var(--ink-tertiary);
+}
+
+/* ---------------------------------------------------------------- welcome */
+
+.q-welcome {
+  min-height: 100vh;
+  /* A warm, quiet wash — Apple's product pages use a barely-there tint rather
+     than a saturated gradient. */
+  background:
+    radial-gradient(120% 80% at 50% -10%, var(--accent-soft), transparent 60%),
+    var(--bg);
+}
+
+.q-welcome-inner {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--s-16) var(--s-6) var(--s-24);
+}
+
+.q-welcome-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: var(--r-lg);
+  background: var(--ink);
+  color: var(--bg);
+  margin-bottom: var(--s-8);
+  box-shadow: var(--shadow-md);
+}
+
+.q-welcome-mark svg {
+  width: 2rem;
+  height: 2rem;
+}
+
+.q-welcome-title {
+  font-family: var(--font-sans);
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  line-height: 1.08;
+  letter-spacing: -0.022em;
+  font-weight: var(--weight-semibold);
+  text-wrap: balance;
+}
+
+.q-welcome-lead {
+  margin-top: var(--s-5);
+  font-size: var(--text-lead);
+  line-height: var(--leading-lead);
+  letter-spacing: var(--tracking-lead);
+  color: var(--ink-secondary);
+  max-width: 44ch;
+}
+
+.q-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  margin-top: var(--s-12);
+}
+
+.q-step {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: var(--s-4);
+  padding: var(--s-5) 0;
+  border-top: var(--hairline-w) solid var(--line);
+}
+
+.q-step:last-child {
+  border-bottom: var(--hairline-w) solid var(--line);
+}
+
+.q-step-num {
+  font-family: var(--font-num);
+  font-size: var(--text-sub);
+  font-weight: var(--weight-semibold);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  padding-top: 0.125rem;
+}
+
+.q-step-title {
+  font-size: var(--text-title);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-title);
+  font-weight: var(--weight-semibold);
+}
+
+.q-step-body {
+  margin-top: var(--s-2);
+  color: var(--ink-secondary);
+  line-height: var(--leading-body);
+  max-width: 52ch;
+}
+
+/* ---------------------------------------------------------------- consent */
+
+.q-consent {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--bg-inset);
+  font-size: var(--text-sub);
+  line-height: var(--leading-sub);
+  color: var(--ink-secondary);
+}
+
+.q-consent svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  margin-top: 0.125rem;
+  color: var(--ink-tertiary);
+}
+
+/* ------------------------------------------------------------------- misc */
+
+.q-inline-code {
+  font-family: var(--font-num);
+  font-size: 0.9em;
+  padding: 0.0625rem 0.3125rem;
+  border-radius: var(--r-xs);
+  background: var(--bg-inset);
+  color: var(--ink-secondary);
+}
+
+.q-kbd {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-num);
+  font-size: var(--text-cap);
+  padding: 0.0625rem 0.375rem;
+  border-radius: var(--r-xs);
+  background: var(--bg-elevated);
+  box-shadow:
+    inset 0 0 0 var(--hairline-w) var(--line),
+    0 1px 0 var(--line);
+  color: var(--ink-secondary);
+}

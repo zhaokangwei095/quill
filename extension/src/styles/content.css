@@ -1,0 +1,9 @@
+/* ---------------------------------------------------------------------------
+ * The stylesheet injected into a shadow root on the host page.
+ * ---------------------------------------------------------------------------
+ * Bundled by esbuild, which resolves the `@import`s at build time, and linked
+ * from inside the shadow root so nothing leaks either direction.
+ * ------------------------------------------------------------------------- */
+
+@import "../../../packages/design/base.css";
+@import "./panel.css";

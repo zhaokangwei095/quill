@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>校园招聘 - 后端开发工程师</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: #f5f5f7;
+        color: #1d1d1f;
+      }
+      header { background: #fff; border-bottom: 1px solid #e5e5e7; padding: 20px 32px; }
+      h1 { margin: 0; font-size: 22px; }
+      .company { color: #6e6e73; font-size: 13px; margin-top: 4px; }
+      main { max-width: 760px; margin: 0 auto; padding: 32px; }
+      fieldset { border: none; margin: 0 0 28px; padding: 0; }
+      legend { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
+      .row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; align-items: center; margin-bottom: 12px; }
+      .row > label, .row > .lab { font-size: 14px; color: #3a3a3c; }
+      input[type="text"], input[type="email"], input[type="tel"], input[type="date"], select, textarea {
+        font: inherit; font-size: 14px; width: 100%; box-sizing: border-box;
+        padding: 8px 10px; border: 1px solid #d2d2d7; border-radius: 8px; background: #fff;
+      }
+      textarea { min-height: 84px; }
+      .radio-row { display: flex; gap: 18px; font-size: 14px; }
+      .radio-row label { display: flex; gap: 5px; align-items: center; }
+      .req::after { content: "*"; color: #e02d1b; margin-left: 2px; }
+      table { border-collapse: collapse; width: 100%; }
+      td { padding: 6px 10px 6px 0; font-size: 14px; vertical-align: middle; }
+      td.lab { color: #3a3a3c; width: 130px; }
+      .section-note { font-size: 12px; color: #86868b; margin: -6px 0 14px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>后端开发工程师（2026 校招）</h1>
+      <div class="company">示例科技有限公司 · 深圳 · 校园招聘</div>
+    </header>
+
+    <main>
+      <form id="apply">
+        <!-- ---------------------------------------------------- identity -->
+        <fieldset>
+          <legend>基本信息</legend>
+          <div class="row"><label for="name" class="req">姓名</label><input id="name" type="text" name="userName" /></div>
+          <div class="row"><label for="gender">性别</label>
+            <select id="gender" name="gender">
+              <option value="">请选择</option>
+              <option value="M">男</option>
+              <option value="F">女</option>
+            </select>
+          </div>
+          <div class="row"><label for="birth">出生日期</label><input id="birth" type="date" name="birthDate" /></div>
+          <div class="row"><label for="nation">民族</label><input id="nation" type="text" name="ethnicity" /></div>
+          <div class="row"><label for="politic">政治面貌</label>
+            <select id="politic" name="politicalStatus">
+              <option value="">请选择</option>
+              <option value="1">中共党员</option>
+              <option value="2">共青团员</option>
+              <option value="3">群众</option>
+            </select>
+          </div>
+          <div class="row"><label for="hukou">户口所在地</label><input id="hukou" type="text" name="household" /></div>
+          <div class="row"><span class="lab">是否有亲属在本单位任职</span>
+            <div class="radio-row">
+              <label><input type="radio" name="relatives" value="yes" />是</label>
+              <label><input type="radio" name="relatives" value="no" />否</label>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- ----------------------------------------------------- contact -->
+        <fieldset>
+          <legend>联系方式</legend>
+          <div class="row"><label for="phone" class="req">手机号码</label><input id="phone" type="tel" name="mobilePhone" autocomplete="tel" /></div>
+          <div class="row"><label for="email" class="req">电子邮箱</label><input id="email" type="email" name="email" autocomplete="email" /></div>
+          <div class="row"><label for="city">现居住地</label><input id="city" type="text" name="currentCity" /></div>
+          <div class="row"><label for="addr">通讯地址</label><input id="addr" type="text" name="address" /></div>
+          <div class="row"><label for="wechat">微信号</label><input id="wechat" type="text" name="wechat" /></div>
+        </fieldset>
+
+        <!-- --------------------------------------------------- education -->
+        <fieldset>
+          <legend>教育经历</legend>
+          <table>
+            <tr>
+              <td class="lab">学校名称</td>
+              <td><input type="text" name="school[0]" /></td>
+              <td class="lab">专业</td>
+              <td><input type="text" name="major[0]" /></td>
+            </tr>
+            <tr>
+              <td class="lab">学历</td>
+              <td>
+                <select name="degree[0]">
+                  <option value="">请选择</option>
+                  <option value="bachelor">本科</option>
+                  <option value="master">硕士研究生</option>
+                  <option value="phd">博士研究生</option>
+                </select>
+              </td>
+              <td class="lab">毕业时间</td>
+              <td><input type="text" name="gradDate[0]" placeholder="yyyy.MM" /></td>
+            </tr>
+            <tr>
+              <td class="lab">GPA</td>
+              <td><input type="text" name="gpa[0]" /></td>
+              <td class="lab">专业排名</td>
+              <td><input type="text" name="rank[0]" /></td>
+            </tr>
+          </table>
+          <p class="section-note">如有第二段教育经历，请点击“添加”后继续填写。</p>
+        </fieldset>
+
+        <!-- -------------------------------------------------- experience -->
+        <fieldset>
+          <legend>实习或工作经历</legend>
+          <table>
+            <tr>
+              <td class="lab">公司名称</td>
+              <td><input type="text" name="company[0]" /></td>
+              <td class="lab">职位名称</td>
+              <td><input type="text" name="jobTitle[0]" /></td>
+            </tr>
+            <tr>
+              <td class="lab">开始时间</td>
+              <td><input type="text" name="workStart[0]" /></td>
+              <td class="lab">结束时间</td>
+              <td><input type="text" name="workEnd[0]" /></td>
+            </tr>
+          </table>
+          <div style="margin-top: 12px">
+            <div class="lab" style="margin-bottom: 6px">工作内容</div>
+            <textarea name="workDesc[0]"></textarea>
+          </div>
+        </fieldset>
+
+        <!-- ------------------------------------------------ preference -->
+        <fieldset>
+          <legend>求职意向</legend>
+          <div class="row"><label for="pos">意向岗位</label><input id="pos" type="text" name="expectPosition" /></div>
+          <div class="row"><label for="expcity">意向城市</label><input id="expcity" type="text" name="expectCity" /></div>
+          <div class="row"><label for="salary">期望薪资</label><input id="salary" type="text" name="expectSalary" /></div>
+          <div class="row"><label for="avail">到岗时间</label><input id="avail" type="text" name="availableFrom" /></div>
+          <div class="row"><label for="source">获取渠道</label>
+            <select id="source" name="source">
+              <option value="">请选择</option>
+              <option value="campus">校园宣讲会</option>
+              <option value="referral">内部推荐</option>
+              <option value="website">招聘官网</option>
+              <option value="jobboard">招聘平台</option>
+            </select>
+          </div>
+        </fieldset>
+
+        <!-- ------------------------------------------------------ essay -->
+        <fieldset>
+          <legend>开放问答</legend>
+          <div style="margin-bottom: 16px">
+            <div class="lab req" style="margin-bottom: 6px">请做一个简短的自我介绍</div>
+            <textarea name="selfIntro" data-maxlength-text="不超过 500 字"></textarea>
+            <div class="section-note">不超过 500 字</div>
+          </div>
+          <div style="margin-bottom: 16px">
+            <div class="lab" style="margin-bottom: 6px">为什么选择这个岗位</div>
+            <textarea name="whyRole"></textarea>
+          </div>
+          <div>
+            <div class="lab" style="margin-bottom: 6px">其他补充说明</div>
+            <textarea name="additional"></textarea>
+          </div>
+        </fieldset>
+
+        <!-- ------------------------------------------------------- meta -->
+        <fieldset>
+          <legend>提交</legend>
+          <div class="row"><label for="code">验证码</label><input id="code" type="text" name="captcha" /></div>
+          <div class="row"><span class="lab"></span>
+            <label style="font-size: 14px"><input type="checkbox" name="agree" /> 我已阅读并同意隐私政策</label>
+          </div>
+        </fieldset>
+      </form>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "extName": {
+    "message": "Quill — Job Application Autofill",
+    "description": "Extension name shown in the Chrome toolbar and Web Store."
+  },
+  "extDescription": {
+    "message": "Reads the fields on a job application form, proposes values from your resume and past answers, and remembers what you type yourself.",
+    "description": "One-sentence purpose, shown under the name in the Web Store."
+  },
+  "actionTitle": {
+    "message": "Quill"
+  },
+  "commandScan": {
+    "message": "Scan this page's form"
+  },
+  "contextMenuFill": {
+    "message": "Scan this page's form with Quill"
+  }
+}

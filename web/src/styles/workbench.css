@@ -1,0 +1,822 @@
+/* ---------------------------------------------------------------------------
+ * The workbench
+ * ---------------------------------------------------------------------------
+ * A two-column application shell: a fixed rail for navigation, a scrolling
+ * content column, and (when a view needs it) a side panel that slides in.
+ *
+ * Layout notes:
+ *  · The rail is 4.5rem of icons with labels revealed on hover, which keeps the
+ *    content column wide on a laptop without hiding navigation.
+ *  · Content is capped at 78rem and left-aligned inside it, not centred. A
+ *    centred column with a left rail looks off-axis.
+ *  · On narrow screens the rail becomes a bottom tab bar, because a person
+ *    checking their ledger on a phone should not have to reach the top corner.
+ * ------------------------------------------------------------------------- */
+
+@import "../../../packages/design/base.css";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg-grouped);
+  overflow: hidden;
+}
+
+.q-app {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------- rail */
+
+.q-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-4) 0;
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: var(--material-bar);
+  backdrop-filter: var(--material-bar);
+  border-right: var(--hairline-w) solid var(--line);
+  z-index: var(--z-sticky);
+}
+
+.q-rail-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--bg);
+  margin-bottom: var(--s-4);
+  flex: none;
+  --q-mark-counter: var(--ink);
+}
+
+.q-rail-mark svg {
+  width: 1.375rem;
+  height: 1.375rem;
+}
+
+.q-rail-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1875rem;
+  width: 3.5rem;
+  padding: var(--s-2) 0.25rem;
+  border-radius: var(--r-md);
+  color: var(--ink-tertiary);
+  transition:
+    background-color var(--d-fast) var(--ease-out),
+    color var(--d-fast) var(--ease-out);
+}
+
+.q-rail-item:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.q-rail-item[aria-current="page"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.q-rail-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.25rem;
+}
+
+.q-rail-label {
+  font-size: var(--text-micro);
+  line-height: 1.2;
+  letter-spacing: 0;
+  font-weight: var(--weight-medium);
+}
+
+/* A badge for counts, positioned so it never shifts the label. */
+.q-rail-badge {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.5rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-num);
+  font-size: 0.625rem;
+  font-weight: var(--weight-semibold);
+  line-height: 1rem;
+  text-align: center;
+}
+
+.q-rail-spacer {
+  flex: 1;
+}
+
+/* -------------------------------------------------------------- main area */
+
+.q-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.q-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-6);
+  border-bottom: var(--hairline-w) solid var(--line);
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: var(--material-bar);
+  backdrop-filter: var(--material-bar);
+  flex: none;
+  min-height: 3.25rem;
+}
+
+.q-topbar-title {
+  font-size: var(--text-title);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-title);
+  font-weight: var(--weight-semibold);
+}
+
+.q-topbar-sub {
+  font-size: var(--text-cap);
+  color: var(--ink-tertiary);
+}
+
+.q-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.q-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.q-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.q-page {
+  max-width: var(--content-max);
+  padding: var(--s-10) var(--s-8) var(--s-24);
+}
+
+.q-page-head {
+  margin-bottom: var(--s-8);
+}
+
+.q-page-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-h2);
+  line-height: var(--leading-h2);
+  letter-spacing: var(--tracking-h2);
+  font-weight: var(--weight-semibold);
+  text-wrap: balance;
+}
+
+.q-page-lead {
+  margin-top: var(--s-4);
+  font-size: var(--text-lead);
+  line-height: var(--leading-lead);
+  letter-spacing: var(--tracking-lead);
+  color: var(--ink-secondary);
+  max-width: 60ch;
+}
+
+/* Sections inside a page. */
+.q-block {
+  margin-bottom: var(--s-10);
+}
+
+.q-block-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+
+.q-block-title {
+  font-size: var(--text-h4);
+  line-height: var(--leading-h4);
+  letter-spacing: var(--tracking-h4);
+  font-weight: var(--weight-semibold);
+}
+
+.q-block-sub {
+  margin-top: var(--s-1);
+  font-size: var(--text-sub);
+  color: var(--ink-tertiary);
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.q-grid {
+  display: grid;
+  gap: var(--s-4);
+}
+
+.q-grid-2 {
+  /*
+   * `auto-fill`, not `auto-fit`. With `auto-fit` the empty tracks collapse, so a
+   * lone card stretches across the whole content column — a 1200px-wide card
+   * holding one sentence. `auto-fill` keeps the tracks, so one card occupies one
+   * column's worth of width and the layout stays legible as the count changes.
+   */
+  grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr));
+}
+
+/**
+ * A grid of *cards*, as opposed to a grid of form fields.
+ *
+ * Cards read badly when they are either very wide or very narrow, so this one
+ * caps its total width at two comfortable columns and centres nothing — the
+ * block starts at the content's left edge like everything else on the page.
+ */
+.q-grid-cards {
+  display: grid;
+  gap: var(--s-4);
+  grid-template-columns: repeat(auto-fill, minmax(min(22rem, 100%), 1fr));
+  max-width: 60rem;
+}
+
+.q-grid-3 {
+  grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr));
+}
+
+.q-card-lg {
+  padding: var(--s-6);
+  border-radius: var(--r-xl);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.q-metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-xs);
+}
+
+.q-metric-value {
+  font-family: var(--font-num);
+  font-size: 2.25rem;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.q-metric-label {
+  font-size: var(--text-cap);
+  color: var(--ink-tertiary);
+  letter-spacing: var(--tracking-cap);
+}
+
+/* --------------------------------------------------------------- dropzone */
+
+.q-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-12) var(--s-6);
+  border-radius: var(--r-xl);
+  background:
+    linear-gradient(var(--bg-elevated), var(--bg-elevated)) padding-box,
+    repeating-linear-gradient(
+        90deg,
+        var(--line-strong) 0 6px,
+        transparent 6px 12px
+      )
+      border-box;
+  border: 1.5px dashed transparent;
+  text-align: center;
+  transition:
+    background-color var(--d-base) var(--ease-out),
+    transform var(--d-base) var(--ease-out);
+  cursor: pointer;
+}
+
+.q-dropzone:hover {
+  transform: translateY(-1px);
+}
+
+/* A solid state while a file is over the zone, so the target is unmistakable. */
+.q-dropzone[data-active="true"] {
+  background:
+    linear-gradient(var(--accent-soft), var(--accent-soft)) padding-box,
+    var(--accent) border-box;
+}
+
+.q-dropzone-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--r-lg);
+  background: var(--bg-inset);
+  color: var(--ink-secondary);
+}
+
+.q-dropzone-title {
+  font-size: var(--text-title);
+  letter-spacing: var(--tracking-title);
+  font-weight: var(--weight-semibold);
+}
+
+.q-dropzone-hint {
+  font-size: var(--text-sub);
+  color: var(--ink-tertiary);
+  max-width: 42ch;
+}
+
+/* ------------------------------------------------------------ data tables */
+
+.q-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--bg-elevated);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+  font-size: var(--text-sub);
+}
+
+.q-table th {
+  text-align: left;
+  font-size: var(--text-cap);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+  padding: var(--s-3) var(--s-4);
+  background: var(--bg-inset);
+  white-space: nowrap;
+}
+
+.q-table td {
+  padding: var(--s-3) var(--s-4);
+  border-top: var(--hairline-w) solid var(--line);
+  vertical-align: middle;
+}
+
+.q-table tbody tr {
+  transition: background-color var(--d-fast) var(--ease-out);
+}
+
+.q-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/**
+ * Narrow screens: a table becomes a stack of labelled cards. Dropping columns
+ * is the common shortcut and it loses the information the person came for.
+ */
+@media (max-width: 720px) {
+  .q-table,
+  .q-table tbody,
+  .q-table tr,
+  .q-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .q-table thead {
+    display: none;
+  }
+
+  .q-table tr {
+    padding: var(--s-3) 0;
+    border-top: var(--hairline-w) solid var(--line);
+  }
+
+  .q-table td {
+    border: none;
+    padding: var(--s-1) var(--s-4);
+    display: flex;
+    gap: var(--s-3);
+  }
+
+  .q-table td::before {
+    content: attr(data-label);
+    flex: none;
+    width: 5rem;
+    font-size: var(--text-cap);
+    color: var(--ink-tertiary);
+  }
+}
+
+/* --------------------------------------------------------------- diff view */
+
+/* The tailored-resume view: original above, rewrite below, no colour-coding. */
+.q-bullet {
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-xs);
+}
+
+.q-bullet + .q-bullet {
+  margin-top: var(--s-2);
+}
+
+.q-bullet-source {
+  font-size: var(--text-cap);
+  color: var(--ink-tertiary);
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+
+.q-bullet-original {
+  font-size: var(--text-sub);
+  color: var(--ink-tertiary);
+  padding-left: var(--s-3);
+  border-left: 2px solid var(--line);
+  line-height: var(--leading-sub);
+}
+
+.q-bullet-tailored {
+  margin-top: var(--s-3);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--ink);
+}
+
+.q-bullet-note {
+  margin-top: var(--s-2);
+  font-size: var(--text-cap);
+  color: var(--accent);
+}
+
+.q-gap {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-xs);
+}
+
+.q-gap + .q-gap {
+  margin-top: var(--s-2);
+}
+
+.q-gap[data-verdict="gap"] {
+  background: var(--red-soft);
+}
+
+.q-gap[data-verdict="partial"] {
+  background: var(--orange-soft);
+}
+
+/* ------------------------------------------------------------- sheet/panel */
+
+/**
+ * A right-hand sheet for detail views, so the person never loses the list
+ * they were looking at. On narrow screens it becomes a full-screen page.
+ */
+.q-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(38rem, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-modal);
+  animation: q-sheet-in var(--d-slow) var(--ease-out);
+}
+
+@keyframes q-sheet-in {
+  from {
+    transform: translateX(2rem);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.q-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  border-bottom: var(--hairline-w) solid var(--line);
+  flex: none;
+}
+
+.q-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-5);
+}
+
+.q-sheet-foot {
+  display: flex;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-5);
+  border-top: var(--hairline-w) solid var(--line);
+  flex: none;
+}
+
+.q-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-scrim);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  z-index: var(--z-scrim);
+  animation: q-fade var(--d-base) var(--ease-out);
+}
+
+/* --------------------------------------------------------------- markdown */
+
+/* Rendered resume text and cover letters. */
+.q-prose {
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--ink);
+  max-width: var(--measure);
+}
+
+.q-prose p + p {
+  margin-top: var(--s-4);
+}
+
+.q-prose h3 {
+  margin-top: var(--s-6);
+  margin-bottom: var(--s-2);
+}
+
+.q-prose ul {
+  margin: var(--s-3) 0;
+  padding-left: var(--s-5);
+  list-style: disc;
+}
+
+.q-prose li {
+  margin-bottom: var(--s-1);
+}
+
+/* ------------------------------------------------------------- timeline */
+
+.q-timeline {
+  position: relative;
+  padding-left: var(--s-5);
+}
+
+.q-timeline::before {
+  content: "";
+  position: absolute;
+  left: 0.25rem;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: var(--hairline-w);
+  background: var(--line);
+}
+
+.q-timeline-item {
+  position: relative;
+  padding-bottom: var(--s-4);
+}
+
+.q-timeline-item::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--s-5) + 0.0625rem);
+  top: 0.4375rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 1.5px var(--line-strong);
+}
+
+.q-timeline-item:first-child::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+
+/* ------------------------------------------------------------------ stage */
+
+.q-stage-track {
+  display: flex;
+  align-items: center;
+  gap: 0.1875rem;
+}
+
+.q-stage-seg {
+  height: 0.25rem;
+  flex: 1;
+  border-radius: 99px;
+  background: var(--bg-inset);
+}
+
+.q-stage-seg[data-done="true"] {
+  background: var(--accent);
+}
+
+.q-stage-seg[data-state="rejected"] {
+  background: var(--red);
+}
+
+/* --------------------------------------------------------------- toolbar */
+
+.q-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.q-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0 var(--s-3);
+  height: 2.25rem;
+  border-radius: var(--r-pill);
+  background: var(--bg-inset);
+  color: var(--ink-tertiary);
+  min-width: 14rem;
+}
+
+.q-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  font-size: var(--text-sub);
+  color: var(--ink);
+}
+
+.q-search input:focus {
+  outline: none;
+}
+
+/* A vertical stack of setting rows separated by hairlines. */
+.q-setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-4);
+}
+
+.q-setting-group .q-btn {
+  justify-content: flex-start;
+}
+
+.q-segmented {
+  display: inline-flex;
+  padding: 0.125rem;
+  border-radius: var(--r-pill);
+  background: var(--bg-inset);
+}
+
+.q-segmented button {
+  padding: 0.25rem var(--s-3);
+  border-radius: var(--r-pill);
+  font-size: var(--text-cap);
+  font-weight: var(--weight-medium);
+  color: var(--ink-secondary);
+  transition:
+    background-color var(--d-fast) var(--ease-out),
+    color var(--d-fast) var(--ease-out);
+}
+
+.q-segmented button[aria-pressed="true"] {
+  background: var(--bg-elevated);
+  color: var(--ink);
+  box-shadow: var(--shadow-xs);
+}
+
+/* ---------------------------------------------------------------- insight */
+
+.q-insight {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-xs);
+}
+
+.q-insight[data-kind="warning"] {
+  background: var(--orange-soft);
+}
+
+.q-insight[data-kind="success"] {
+  background: var(--green-soft);
+}
+
+.q-insight-title {
+  font-size: var(--text-sub);
+  font-weight: var(--weight-semibold);
+}
+
+.q-insight-detail {
+  margin-top: var(--s-1);
+  font-size: var(--text-sub);
+  color: var(--ink-secondary);
+  line-height: var(--leading-sub);
+}
+
+/* ------------------------------------------------------------- responsive */
+
+@media (max-width: 900px) {
+  .q-page {
+    padding: var(--s-6) var(--s-5) var(--s-20);
+  }
+
+  .q-topbar {
+    padding: var(--s-3) var(--s-5);
+  }
+
+  .q-page-title {
+    font-size: var(--text-h3);
+    letter-spacing: var(--tracking-h3);
+  }
+}
+
+/**
+ * Phone: the rail moves to the bottom. A left rail on a phone wastes the only
+ * dimension that matters, and the bottom third of the screen is the reachable
+ * part.
+ */
+@media (max-width: 640px) {
+  .q-app {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+
+  .q-rail {
+    order: 2;
+    flex-direction: row;
+    justify-content: space-around;
+    padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom));
+    border-right: none;
+    border-top: var(--hairline-w) solid var(--line);
+  }
+
+  .q-rail-mark,
+  .q-rail-spacer {
+    display: none;
+  }
+
+  .q-rail-item {
+    width: auto;
+    flex: 1;
+    min-height: 3rem;
+  }
+
+  .q-rail-badge {
+    right: calc(50% - 0.75rem);
+    top: 0;
+  }
+
+  .q-sheet {
+    width: 100vw;
+    top: var(--s-8);
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+  }
+}

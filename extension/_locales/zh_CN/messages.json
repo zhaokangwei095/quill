@@ -1,0 +1,19 @@
+{
+  "extName": {
+    "message": "Quill — 网申自动填写",
+    "description": "Extension name shown in the Chrome toolbar and Web Store."
+  },
+  "extDescription": {
+    "message": "读取网申页面的字段，依据你的简历与历史填写记录给出填写方案，并记住你手动补充的内容。",
+    "description": "One-sentence purpose, shown under the name in the Web Store."
+  },
+  "actionTitle": {
+    "message": "Quill 网申助手"
+  },
+  "commandScan": {
+    "message": "识别当前页面的表单"
+  },
+  "contextMenuFill": {
+    "message": "用 Quill 识别此页面的表单"
+  }
+}
