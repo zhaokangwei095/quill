@@ -37,6 +37,7 @@ interface Context {
 const WorkbenchContext = createContext<Context | undefined>(undefined);
 
 const EMPTY: WorkbenchState = {
+  profiles: [],
   documents: [],
   memory: [],
   analyses: [],

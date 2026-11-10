@@ -1,6 +1,7 @@
 # Build outputs
 extension/dist/
 web/dist/
+*.tsbuildinfo
 
 # Test and tooling scratch space
 .test-build/
@@ -19,5 +20,12 @@ chrome/
 
 node_modules/
 *.log
+
+# Local agent configuration
+.claude/
+
+# Secrets — the recognition service reads UNISOUND_API_KEY from here
+.env
+server/.env
 .DS_Store
 Thumbs.db

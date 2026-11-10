@@ -159,8 +159,8 @@ export function MemoryView({ onToast }: { onToast: Toast }): JSX.Element {
                     </span>
                     <div className="q-grow" style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                       {conflict.entries.map((entry) => (
-                        <div key={entry.id} style={{ display: "flex", gap: "var(--s-2)", alignItems: "center" }}>
-                          <span className="q-chip q-chip-neutral">{entry.value}</span>
+                        <div key={entry.id} className="q-memory-conflict-row">
+                          <span className="q-chip q-chip-neutral q-memory-conflict-value">{entry.value}</span>
                           <span className="q-cap">{relativeTime(entry.updatedAt)}</span>
                           <button
                             type="button"
@@ -232,15 +232,15 @@ export function MemoryView({ onToast }: { onToast: Toast }): JSX.Element {
               const preview = previewMemory(entry);
 
               return (
-                <div className="q-card-lg q-reveal" key={entry.id}>
-                  <div className="q-between" style={{ marginBottom: "var(--s-3)" }}>
-                    <span className="q-label" style={{ minWidth: 0 }}>
+                <div className="q-card-lg q-memory-card q-reveal" key={entry.id}>
+                  <div className="q-between q-memory-head" style={{ marginBottom: "var(--s-3)" }}>
+                    <span className="q-label q-memory-label">
                       <span className="q-truncate" title={entry.labelSnapshot}>
                         {entry.labelSnapshot || entry.key}
                       </span>
-                      {sensitive && <Lock size={12} style={{ color: "var(--ink-tertiary)" }} />}
+                      {sensitive && <Lock size={12} style={{ color: "var(--ink-tertiary)", flex: "none" }} />}
                     </span>
-                    <div style={{ display: "flex", gap: "0.125rem" }}>
+                    <div className="q-memory-actions">
                       {sensitive && (
                         <button
                           type="button"
@@ -282,13 +282,14 @@ export function MemoryView({ onToast }: { onToast: Toast }): JSX.Element {
                   </div>
 
                   {isEditing ? (
-                    <div style={{ display: "flex", gap: "var(--s-2)" }}>
-                      <input
-                        className="q-input"
+                    <div className="q-memory-editor">
+                      <textarea
+                        className="q-textarea"
                         value={draft}
                         onChange={(event) => setDraft(event.target.value)}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter") {
+                          // Enter belongs to the value: these entries can be paragraphs.
+                          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                             void saveEntry({ ...entry, value: draft.trim() });
                             setEditing(undefined);
                           }
@@ -296,20 +297,23 @@ export function MemoryView({ onToast }: { onToast: Toast }): JSX.Element {
                         }}
                         autoFocus
                       />
-                      <button
-                        type="button"
-                        className="q-btn q-btn-primary q-btn-sm"
-                        disabled={!draft.trim()}
-                        onClick={() => {
-                          void saveEntry({ ...entry, value: draft.trim() });
-                          setEditing(undefined);
-                        }}
-                      >
-                        保存
-                      </button>
+                      <div className="q-memory-editor-actions">
+                        <span className="q-cap">⌘/Ctrl + Enter 保存 · Esc 取消</span>
+                        <button
+                          type="button"
+                          className="q-btn q-btn-primary q-btn-sm"
+                          disabled={!draft.trim()}
+                          onClick={() => {
+                            void saveEntry({ ...entry, value: draft.trim() });
+                            setEditing(undefined);
+                          }}
+                        >
+                          保存
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <div style={{ fontSize: "var(--text-body)", wordBreak: "break-word" }}>
+                    <div className="q-memory-value">
                       {sensitive && !isRevealed ? preview.value || maskValue(entry.value) : entry.value}
                     </div>
                   )}

@@ -22,14 +22,16 @@ import {
   type FillPlan,
   type PageScan,
 } from "@quill/core";
-import type { FillReport } from "../shared/protocol.js";
+import type { FillReport, SectionPlanItem } from "../shared/protocol.js";
 import {
   Check,
   CheckCircle,
   ChevronDown,
   Eye,
   Info,
+  Locate,
   Minus,
+  Plus,
   Question,
   QuillMark,
   Refresh,
@@ -40,18 +42,32 @@ import {
 
 /* ------------------------------------------------------------------ types */
 
-export interface PanelProps {
+export interface FocusFieldResult {
+  ok: boolean;
+  message: string;
+}
+
+interface PanelProps {
   plan?: FillPlan;
   scan?: PageScan;
   summary: string;
   report?: FillReport;
+  /** Empty sections that a full “填写” would open first. */
+  sections?: SectionPlanItem[];
   busy: boolean;
   error?: string;
   collapsed: boolean;
+  /** Current extension build, shown so a reload is easy to verify. */
+  version: string;
   position: { x: number; y: number };
   onRefresh: () => void;
   onApply: (refs?: string[]) => void;
   onLearn: (decision: Decision, value: string) => void;
+  onFocusField: (decision: Decision) => FocusFieldResult;
+  /** Add this fill to the application ledger. */
+  onRecord?: () => Promise<{ ok: boolean }>;
+  /** Copy a redacted diagnostic bundle for a bug report. */
+  onDiagnostics?: () => Promise<{ ok: boolean; message?: string }>;
   onCollapse: (collapsed: boolean) => void;
   onClose: () => void;
   onHide: () => void;
@@ -66,10 +82,10 @@ export interface PanelProps {
 
 /** Group ordering: what blocks the person comes first. */
 const GROUP_ORDER: Array<{ status: DecisionStatus; title: string }> = [
-  { status: "missing", title: "缺少资料" },
-  { status: "choice", title: "需要你选择" },
-  { status: "review", title: "建议确认" },
-  { status: "ready", title: "将自动填写" },
+  { status: "missing", title: "暂缺资料" },
+  { status: "choice", title: "需你选择" },
+  { status: "review", title: "待你确认" },
+  { status: "ready", title: "可直接填写" },
 ];
 
 const STATUS_LABEL: Record<DecisionStatus, string> = {
@@ -119,6 +135,7 @@ export function Panel(props: PanelProps): JSX.Element {
     plan,
     summary,
     report,
+    sections,
     busy,
     error,
     collapsed,
@@ -126,6 +143,10 @@ export function Panel(props: PanelProps): JSX.Element {
     onRefresh,
     onApply,
     onLearn,
+    onRecord,
+    onDiagnostics,
+    onFocusField,
+    version,
     onCollapse,
     onClose,
     onHide,
@@ -137,6 +158,23 @@ export function Panel(props: PanelProps): JSX.Element {
 
   const [editing, setEditing] = useState<string | undefined>();
   const [draft, setDraft] = useState("");
+  const [focusMessages, setFocusMessages] = useState<Record<string, FocusFieldResult>>({});
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<DecisionStatus>>(() => new Set());
+  const [diagnosticState, setDiagnosticState] = useState<"idle" | "busy" | "done" | "failed">("idle");
+  const [diagnosticMessage, setDiagnosticMessage] = useState("");
+
+  const reportProblem = async (): Promise<void> => {
+    if (!onDiagnostics || diagnosticState === "busy") return;
+    setDiagnosticState("busy");
+    try {
+      const result = await onDiagnostics();
+      setDiagnosticState(result.ok ? "done" : "failed");
+      setDiagnosticMessage(result.message ?? "");
+    } catch {
+      setDiagnosticState("failed");
+      setDiagnosticMessage("");
+    }
+  };
 
   const tally = useMemo(() => (plan ? tallyDecisions(plan.decisions) : { ready: 0, review: 0, choice: 0, missing: 0 }), [plan]);
 
@@ -200,12 +238,24 @@ export function Panel(props: PanelProps): JSX.Element {
           <QuillMark size={13} />
         </span>
         <div className="q-grow" style={{ minWidth: 0 }}>
-          <div className="q-head-title">Quill</div>
+          <div className="q-head-title">
+            Quill <span className="q-version">v{version}</span>
+          </div>
           <div className="q-head-sub q-truncate">{summary || "正在识别当前页面…"}</div>
         </div>
         <div className="q-head-actions" onPointerDown={(event) => event.stopPropagation()}>
           <button type="button" className="q-hbtn" onClick={onRefresh} disabled={busy} aria-label="重新识别" title="重新识别">
             <Refresh style={busy ? { animation: "q-spin 900ms linear infinite" } : undefined} />
+          </button>
+          <button
+            type="button"
+            className="q-hbtn"
+            onClick={() => void reportProblem()}
+            disabled={diagnosticState === "busy"}
+            aria-label="报告问题"
+            title="报告问题（复制诊断信息）"
+          >
+            <Question />
           </button>
           <button type="button" className="q-hbtn" onClick={() => onCollapse(true)} aria-label="收起面板" title="收起">
             <Minus />
@@ -217,6 +267,21 @@ export function Panel(props: PanelProps): JSX.Element {
       </header>
 
       <div className="q-body quill-scroll">
+        {diagnosticState === "done" && (
+          <div className="q-notice" data-tone="success">
+            <CheckCircle />
+            <div>诊断信息已复制到剪贴板。把它发给开发者，就能定位这次的问题。</div>
+          </div>
+        )}
+        {diagnosticState === "failed" && (
+          <div className="q-notice" data-tone="warning">
+            <Warning />
+            <div>
+              {diagnosticMessage || "复制失败。可以到工作台「设置 → 诊断与日志」导出诊断包。"}
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="q-notice" data-tone="error">
             <Warning />
@@ -224,7 +289,9 @@ export function Panel(props: PanelProps): JSX.Element {
           </div>
         )}
 
-        {report && <ReportNotice report={report} />}
+        {report && <ReportNotice report={report} onRecord={onRecord} />}
+
+        {sections && sections.length > 0 && <SectionNotice sections={sections} />}
 
         {!plan && !error && <LoadingState />}
 
@@ -232,31 +299,56 @@ export function Panel(props: PanelProps): JSX.Element {
           <>
             <Hero tally={tally} total={plan.decisions.length} notes={plan.notes} />
 
-            {groups.map((group, index) => (
-              <section className="q-section q-reveal" key={group.status} style={{ "--i": index } as CSSProperties}>
-                <div className="q-section-head">
-                  <span className="q-section-title">{group.title}</span>
-                  <span className="q-section-count">{group.items.length}</span>
-                </div>
-                {group.items.map((decision, itemIndex) => (
-                  <FieldRow
-                    key={decision.ref}
-                    decision={decision}
-                    index={itemIndex}
-                    editing={editing === decision.ref}
-                    draft={draft}
-                    ignored={ignored?.has(decision.key) ?? false}
-                    onDraft={setDraft}
-                    onBeginEdit={beginEdit}
-                    onCommit={commitEdit}
-                    onCancel={() => setEditing(undefined)}
-                    onApplyOne={() => onApply([decision.ref])}
-                    onUseCandidate={(value) => onLearn(decision, value)}
-                    onToggleIgnore={onToggleIgnore ? () => onToggleIgnore(decision) : undefined}
-                  />
-                ))}
-              </section>
-            ))}
+            {groups.map((group, index) => {
+              const isCollapsed = collapsedGroups.has(group.status);
+              const rowsId = `q-group-${group.status}`;
+              return (
+                <section className="q-section q-reveal" key={group.status} style={{ "--i": index } as CSSProperties}>
+                  <button
+                    type="button"
+                    className="q-section-head q-section-toggle"
+                    aria-expanded={!isCollapsed}
+                    aria-controls={rowsId}
+                    onClick={() => {
+                      setCollapsedGroups((current) => {
+                        const next = new Set(current);
+                        if (next.has(group.status)) next.delete(group.status);
+                        else next.add(group.status);
+                        return next;
+                      });
+                    }}
+                  >
+                    <span className="q-section-title">{group.title}</span>
+                    <span className="q-section-count">{group.items.length}</span>
+                    <ChevronDown className={`q-section-chevron${isCollapsed ? " is-collapsed" : ""}`} size={13} />
+                  </button>
+                  <div id={rowsId} className="q-section-rows" hidden={isCollapsed}>
+                    {group.items.map((decision, itemIndex) => (
+                      <FieldRow
+                        key={decision.ref}
+                        decision={decision}
+                        index={itemIndex}
+                        editing={editing === decision.ref}
+                        draft={draft}
+                        ignored={ignored?.has(decision.key) ?? false}
+                        onDraft={setDraft}
+                        onBeginEdit={beginEdit}
+                        onCommit={commitEdit}
+                        onCancel={() => setEditing(undefined)}
+                        onApplyOne={() => onApply([decision.ref])}
+                        onUseCandidate={(value) => onLearn(decision, value)}
+                        focusMessage={focusMessages[decision.ref]?.message}
+                        onFocusField={() => {
+                          const result = onFocusField(decision);
+                          setFocusMessages((current) => ({ ...current, [decision.ref]: result }));
+                        }}
+                        onToggleIgnore={onToggleIgnore ? () => onToggleIgnore(decision) : undefined}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
 
             {plan.decisions.length === 0 && (
               <div className="q-empty">
@@ -396,6 +488,8 @@ interface FieldRowProps {
   onCancel: () => void;
   onApplyOne: () => void;
   onUseCandidate: (value: string) => void;
+  focusMessage?: string;
+  onFocusField: () => void;
   onToggleIgnore?: () => void;
 }
 
@@ -411,6 +505,8 @@ function FieldRow({
   onCancel,
   onApplyOne,
   onUseCandidate,
+  focusMessage,
+  onFocusField,
   onToggleIgnore,
 }: FieldRowProps): JSX.Element {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -429,9 +525,16 @@ function FieldRow({
       style={{ "--i": Math.min(index, 8) } as CSSProperties}
     >
       <div className="q-field-label">
-        <span className="q-field-label-text" title={decision.label}>
-          {decision.label}
-        </span>
+        <button
+          type="button"
+          className="q-field-label-text q-field-label-target"
+          title={`定位到网页中的${decision.label}`}
+          aria-label={`定位到网页中的${decision.label}`}
+          onClick={onFocusField}
+        >
+          <span>{decision.label}</span>
+          <Locate size={11} />
+        </button>
         {decision.required && <span className="q-field-req">必填</span>}
       </div>
 
@@ -477,7 +580,7 @@ function FieldRow({
           )}
           <button type="button" className="q-mini q-mini-accent" onClick={() => onCommit(decision)}>
             <Check />
-            记住
+            填入页面
           </button>
         </div>
       ) : (
@@ -514,6 +617,13 @@ function FieldRow({
         </div>
       )}
 
+      {!editing && focusMessage && (
+        <div className="q-field-why" role="status" aria-live="polite">
+          <Info />
+          <span className="q-field-why-text">{focusMessage}</span>
+        </div>
+      )}
+
       {!editing && (
         <div className="q-field-actions">
           {(decision.status === "review" || decision.status === "choice") && decision.value && (
@@ -525,7 +635,15 @@ function FieldRow({
           <button
             type="button"
             className="q-mini"
-            onClick={() => onBeginEdit(decision, decision.value?.text ?? "")}
+            onClick={() => {
+              if (decision.status === "missing") onFocusField();
+              else onBeginEdit(decision, decision.value?.text ?? "");
+            }}
+            title={
+              decision.status === "missing"
+                ? `定位网页中的${decision.label}，然后直接在该字段输入`
+                : undefined
+            }
           >
             {decision.status === "missing" ? "我来填写" : "改一下"}
           </button>
@@ -563,9 +681,112 @@ function LoadingState(): JSX.Element {
   );
 }
 
-function ReportNotice({ report }: { report: FillReport }): JSX.Element {
+/**
+ * Tell the person, before they click, what “填写” will do with empty sections.
+ *
+ * Two different situations used to look identical — silence:
+ *  - the section is empty and the profile has entries, so filling opens rows;
+ *  - the section is empty and the profile has no entries, so filling must skip it.
+ *
+ * The second one is not a failure, but leaving it unmentioned makes the panel
+ * look like it missed the section. Naming it turns a silent gap into a clear
+ * next step.
+ */
+function SectionNotice({ sections }: { sections: SectionPlanItem[] }): JSX.Element {
+  const openable = sections.filter((section) => section.toAdd > 0);
+  const mismatched = sections.filter((section) => section.reason === "experience-kind-mismatch");
+  const missing = sections.filter((section) => section.desired === 0 && !section.reason);
+
+  const openableNames = openable.map((section) => `「${section.label}」`).join("、");
+  const rows = openable
+    .map((section) =>
+      section.existing > 0
+        ? `${section.label}（已有 ${section.existing} 行，再添加 ${section.toAdd} 行）`
+        : `${section.label} ${section.toAdd} 行`,
+    )
+    .join("、");
+  const missingNames = missing.map((section) => `「${section.label}」`).join("、");
+  const missingHasRows = missing.some((section) => section.existing > 0);
+
+  return (
+    <>
+      {openable.length > 0 && (
+        <div className="q-notice">
+          <Plus />
+          <div className="q-grow">
+            <div>
+              {openable.some((section) => section.existing > 0)
+                ? `页面里的${openableNames}已有空白行，简历里的记录更多。`
+                : `页面里的${openableNames}还是空的，简历里有对应内容。`}
+            </div>
+            <div style={{ marginTop: "0.125rem", opacity: 0.8 }}>
+              点「填写」时会先自动添加 {rows}，再填入资料。
+            </div>
+          </div>
+        </div>
+      )}
+      {missing.length > 0 && (
+        <div className="q-notice">
+          <Info />
+          <div className="q-grow">
+            <div>
+              页面里的{missingNames}
+              {missingHasRows ? "有空白行" : "还是空的"}，你的资料里还没有对应记录。
+            </div>
+            <div style={{ marginTop: "0.125rem", opacity: 0.8 }}>
+              这一栏不会自动添加，需要你手动填写；也可以先在工作台补充资料，再点「重新识别」。
+            </div>
+          </div>
+        </div>
+      )}
+      {mismatched.length > 0 && (
+        <div className="q-notice">
+          <Info />
+          <div className="q-grow">
+            <div>
+              资料库里有其他类别的经历，但与页面里的{mismatched.map((section) => `「${section.label}」`).join("、")}不匹配。
+            </div>
+            <div style={{ marginTop: "0.125rem", opacity: 0.8 }}>
+              Quill 不会用其他类别的经历代替。请在工作台核对经历性质，或在页面添加对应经历后手动填写。
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ReportNotice({
+  report,
+  onRecord,
+}: {
+  report: FillReport;
+  onRecord?: () => Promise<{ ok: boolean }>;
+}): JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  const [recordState, setRecordState] = useState<"idle" | "busy" | "done" | "failed">("idle");
   const failures = report.outcomes.filter((outcome) => !outcome.ok);
+
+  /*
+   * A new report means a new fill. Reset the record control, or a second fill in
+   * the same page view would keep showing "已记入投递台账" from the first one.
+   */
+  useEffect(() => {
+    setRecordState("idle");
+  }, [report]);
+
+  const canRecord = Boolean(onRecord) && report.filled > 0;
+
+  const record = async (): Promise<void> => {
+    if (!onRecord || recordState === "busy" || recordState === "done") return;
+    setRecordState("busy");
+    try {
+      const result = await onRecord();
+      setRecordState(result.ok ? "done" : "failed");
+    } catch {
+      setRecordState("failed");
+    }
+  };
 
   return (
     <div className="q-notice" data-tone={report.failed > 0 ? "warning" : "success"}>
@@ -576,12 +797,35 @@ function ReportNotice({ report }: { report: FillReport }): JSX.Element {
           {report.failed > 0 && `，${report.failed} 项未能填写`}
           {report.skipped > 0 && `，跳过 ${report.skipped} 项`}
         </div>
+        {report.prepared && report.prepared.length > 0 && (
+          <div style={{ marginTop: "0.125rem", opacity: 0.8 }}>
+            已自动添加 {report.prepared.map((item) => `${item.label} ${item.rows} 行`).join("、")}
+          </div>
+        )}
+        {canRecord && (
+          <button
+            type="button"
+            className="q-mini"
+            style={{ marginTop: "0.375rem" }}
+            data-state={recordState}
+            disabled={recordState === "busy" || recordState === "done"}
+            onClick={() => void record()}
+          >
+            {recordState === "done"
+              ? "已记入投递台账"
+              : recordState === "failed"
+                ? "记录失败，点击重试"
+                : recordState === "busy"
+                  ? "正在记录…"
+                  : "记入投递台账"}
+          </button>
+        )}
         {failures.length > 0 && (
           <>
             <button
               type="button"
               className="q-mini"
-              style={{ marginTop: "0.375rem" }}
+              style={{ marginTop: "0.375rem", marginLeft: canRecord ? "0.375rem" : undefined }}
               onClick={() => setExpanded((value) => !value)}
             >
               {expanded ? "收起" : "查看原因"}

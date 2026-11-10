@@ -14,10 +14,19 @@
 
 import {
   analyzeJd,
+  applyReparse,
+  buildDiagnosticBundle,
   buildPlan,
   considerObservation,
+  createDiagnosticEvent,
   createRecord,
+  diagnosticId,
+  effectiveHiringTrack,
+  experiencesForTrack,
+  enrichJobTextFromAnalyses,
+  matchDossierForJob,
   parseResume,
+  previewReparse,
   tailorResume,
   type ApplicationRecord,
   type MemoryEntry,
@@ -50,6 +59,23 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     .catch((error: unknown) => {
       const text = error instanceof Error ? error.message : String(error);
       console.error("[quill] request failed", message.type, text);
+      /*
+       * Keep the failure in the diagnostic buffer as well as the console. The
+       * console is erased when the worker restarts; a person reporting a bug is
+       * usually several page reloads past the point where it mattered.
+       */
+      void store.appendDiagnosticEvent(
+        createDiagnosticEvent({
+          scope: "worker",
+          level: "error",
+          event: "request.failed",
+          data: {
+            request: message.type,
+            message: error instanceof Error ? error.message : String(error),
+            ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+          },
+        }),
+      );
       sendResponse({ ok: false, error: text } satisfies ExtensionResponse);
     });
 
@@ -69,11 +95,23 @@ async function handle(
     /* ------------------------------------------------------------- engine */
 
     case "build-plan": {
-      const state = await store.loadState();
-      const profile = state.profile;
+      const [state, dossierState] = await Promise.all([store.loadState(), store.loadProfileDossiers()]);
+      const jobText = enrichJobTextFromAnalyses(
+        request.pageRole,
+        request.company,
+        request.scan.jobContext,
+        state.analyses,
+      );
+      const match = matchDossierForJob(dossierState.dossiers, dossierState.activeId, {
+        jobRole: request.pageRole,
+        jobText,
+        hiringTrack: request.scan.hiringTrack,
+      });
+      const profile = match.dossier?.profile ?? state.profile;
       if (!profile) {
         return { ok: false, error: "还没有简历资料，请先在工作台上传简历" };
       }
+      const matchNotes = dossierMatchNotes(match, dossierState.dossiers.length, request.pageRole);
       const plan = buildPlan(request.scan, {
         profile,
         memory: state.memory,
@@ -83,7 +121,10 @@ async function handle(
         composeEssays: state.settings.composeEssays,
         preserveExisting: state.settings.preserveExisting,
         autoApplyThreshold: state.settings.autoApplyConfident ? 0.6 : 0.85,
-        notes: request.scan.ats ? [`检测到 ${request.scan.ats} 表单，已启用对应的填写方式`] : [],
+        notes: [
+          ...(request.scan.ats ? [`检测到 ${request.scan.ats} 表单，已启用对应的填写方式`] : []),
+          ...matchNotes,
+        ],
       });
       if (sender.tab?.id !== undefined) {
         lastPlanByTab.set(sender.tab.id, { plan, at: Date.now() });
@@ -146,8 +187,82 @@ async function handle(
 
     /* --------------------------------------------------------------- state */
 
+    case "get-profile-dossiers": {
+      const { dossiers } = await store.loadProfileDossiers();
+      return { ok: true, type: "get-profile-dossiers", dossiers };
+    }
+
     case "get-state":
       return { ok: true, type: "get-state", state: await store.loadState() };
+
+    case "section-targets": {
+      /*
+       * Only the counts cross the process boundary. The content script already
+       * knows which sections the page rendered; it needs to know how many rows
+       * the person's profile can justify opening.
+       */
+      const [state, dossierState] = await Promise.all([store.loadState(), store.loadProfileDossiers()]);
+      const jobText = enrichJobTextFromAnalyses(
+        request.pageRole,
+        request.company,
+        request.jobContext,
+        state.analyses,
+      );
+      const match = matchDossierForJob(dossierState.dossiers, dossierState.activeId, {
+        jobRole: request.pageRole,
+        jobText,
+        hiringTrack: request.hiringTrack,
+      });
+      const profile = match.dossier?.profile ?? state.profile;
+      const track = effectiveHiringTrack(request.hiringTrack, profile?.preference.targetTrack);
+      return {
+        ok: true,
+        type: "section-targets",
+        targets: {
+          education: profile?.education.length ?? 0,
+          experience: profile
+            ? experiencesForTrack(profile.experience, track, request.experienceKind).length
+            : 0,
+          experienceTotal: profile?.experience.length ?? 0,
+          projects: profile?.projects.length ?? 0,
+        },
+      };
+    }
+
+    /* --------------------------------------------------------- diagnostics */
+
+    case "log-event": {
+      await store.appendDiagnosticEvent(request.event);
+      return { ok: true, type: "log-event" };
+    }
+
+    case "diagnostics-snapshot": {
+      await store.saveDiagnosticSnapshot(request.snapshot);
+      return { ok: true, type: "diagnostics-snapshot" };
+    }
+
+    case "diagnostics-export": {
+      const diagnostics = await store.loadDiagnostics();
+      const bundle = buildDiagnosticBundle({
+        reportId: diagnosticId("diag"),
+        createdAt: Date.now(),
+        ...(request.description ? { description: request.description } : {}),
+        environment: {
+          browser: navigator.userAgent,
+          platform: navigator.platform || "unknown",
+          language: navigator.language || "unknown",
+          extensionVersion: chrome.runtime.getManifest().version,
+        },
+        snapshot: diagnostics.snapshot ?? {},
+        events: diagnostics.events,
+      });
+      return { ok: true, type: "diagnostics-export", bundle };
+    }
+
+    case "diagnostics-clear": {
+      await store.clearDiagnostics();
+      return { ok: true, type: "diagnostics-clear" };
+    }
 
     case "save-profile": {
       const profile = await store.saveProfile(request.profile);
@@ -156,22 +271,88 @@ async function handle(
     }
 
     case "import-document": {
+      const before = await store.loadState();
       const document = await store.addDocument(request.document);
       /*
        * Importing a resume is the one action that should also update the
        * profile, because the whole product depends on having one. We parse here
        * rather than in the workbench so both entry points behave identically.
+       *
+       * When a profile already exists the import updates the *active direction*
+       * rather than creating a second dossier: the person explicitly chose
+       * “重新上传” on that direction.
        */
       if (request.document.kind === "resume") {
-        const { profile } = parseResume(document.text, {
-          profileId: "profile-1",
-          sourceDocumentId: document.id,
-        });
+        const profile = request.profile
+          ? {
+              ...request.profile,
+              id: before.profile?.id ?? "profile-1",
+              sourceDocumentId: document.id,
+              updatedAt: Date.now(),
+            }
+          : parseResume(document.text, {
+              profileId: before.profile?.id ?? "profile-1",
+              sourceDocumentId: document.id,
+            }).profile;
+        // Re-uploading is just as destructive as re-parsing: keep the same
+        // one-deep snapshot so “撤销上次替换” covers both paths.
+        if (before.profile) {
+          await store.saveReparseBackup(before.profile, before.activeProfileId);
+        }
         await store.saveProfile(profile);
       }
       const state = await store.loadState();
       await broadcastStateChanged();
       return { ok: true, type: "import-document", state };
+    }
+
+    case "preview-reparse": {
+      const { before, parsed, sourceChars } = await reparseProfile();
+      return {
+        ok: true,
+        type: "preview-reparse",
+        preview: previewReparse(before, parsed, sourceChars),
+      };
+    }
+
+    case "reparse-resume": {
+      const { before, parsed } = await reparseProfile();
+      const next = applyReparse(before, parsed, request.mode);
+      // Snapshot first: a failed write must not leave the old profile replaced.
+      await store.saveReparseBackup(before, (await store.loadState()).activeProfileId);
+      await store.saveProfile(next);
+      await broadcastStateChanged();
+      return { ok: true, type: "reparse-resume", state: await store.loadState() };
+    }
+
+    case "undo-reparse": {
+      await store.restoreReparseBackup();
+      await broadcastStateChanged();
+      return { ok: true, type: "undo-reparse", state: await store.loadState() };
+    }
+
+    case "create-profile": {
+      await store.createProfileDossier(request.name);
+      await broadcastStateChanged();
+      return { ok: true, type: "create-profile", state: await store.loadState() };
+    }
+
+    case "switch-profile": {
+      await store.switchProfileDossier(request.id);
+      await broadcastStateChanged();
+      return { ok: true, type: "switch-profile", state: await store.loadState() };
+    }
+
+    case "rename-profile": {
+      await store.renameProfileDossier(request.id, request.name);
+      await broadcastStateChanged();
+      return { ok: true, type: "rename-profile", state: await store.loadState() };
+    }
+
+    case "delete-profile": {
+      await store.deleteProfileDossier(request.id);
+      await broadcastStateChanged();
+      return { ok: true, type: "delete-profile", state: await store.loadState() };
     }
 
     case "save-memory":
@@ -199,12 +380,36 @@ async function handle(
       return { ok: true, type: "analyze-jd", analysis };
     }
 
+    case "save-analysis-result": {
+      await store.saveAnalysis(request.analysis);
+      await broadcastStateChanged();
+      return { ok: true, type: "save-analysis-result", analysis: request.analysis };
+    }
+
     case "tailor": {
-      const state = await store.loadState();
-      if (!state.profile) return { ok: false, error: "请先上传简历" };
+      const [state, { dossiers, activeId }] = await Promise.all([
+        store.loadState(),
+        store.loadProfileDossiers(),
+      ]);
       const analysis = state.analyses.find((item) => item.id === request.jdAnalysisId);
       if (!analysis) return { ok: false, error: "找不到该岗位分析结果，请重新解析" };
-      const report = tailorResume(state.profile, analysis, request.options ?? {});
+      const match = request.dossierId
+        ? { dossier: dossiers.find((item) => item.id === request.dossierId) }
+        : matchDossierForJob(dossiers, activeId, {
+            jobRole: analysis.role,
+            jobText: [
+              analysis.role,
+              ...analysis.requirements.map((item) => item.text),
+              ...analysis.keywords,
+              ...analysis.sections.map((section) => section.body),
+            ].join("\n"),
+          });
+      const profile = match.dossier?.profile ?? state.profile;
+      if (!profile) return { ok: false, error: "请先上传简历" };
+      const report = tailorResume(profile, analysis, {
+        ...request.options,
+        ...(match.dossier ? { dossierId: match.dossier.id, dossierName: match.dossier.name } : {}),
+      });
       await store.saveReport(report);
       await broadcastStateChanged();
       return { ok: true, type: "tailor", report };
@@ -261,6 +466,48 @@ async function handle(
     default:
       return { ok: false, error: `未知的请求类型 ${(request as { type: string }).type}` };
   }
+}
+
+/**
+ * The text source for re-parsing: the verbatim text saved with the profile,
+ * falling back to the newest resume document for profiles created before that
+ * field existed.
+ */
+async function reparseProfile(): Promise<{
+  before: NonNullable<Awaited<ReturnType<typeof store.loadState>>["profile"]>;
+  parsed: NonNullable<Awaited<ReturnType<typeof store.loadState>>["profile"]>;
+  sourceChars: number;
+}> {
+  const state = await store.loadState();
+  const before = state.profile;
+  if (!before) throw new Error("还没有简历资料，请先上传简历");
+
+  const text = before.rawText ?? state.documents.find((document) => document.kind === "resume")?.text;
+  if (!text) throw new Error("没有可重新解析的简历文字，请重新上传简历");
+
+  const { profile: parsed } = parseResume(text, {
+    profileId: before.id,
+    ...(before.sourceDocumentId ? { sourceDocumentId: before.sourceDocumentId } : {}),
+  });
+  return { before, parsed, sourceChars: text.length };
+}
+
+function dossierMatchNotes(
+  match: ReturnType<typeof matchDossierForJob>,
+  dossierCount: number,
+  jobRole: string | undefined,
+): string[] {
+  if (dossierCount <= 1 || !match.dossier) return [];
+  if (match.matchedByJob && (match.score ?? 0) >= 0.12) {
+    const role = jobRole?.trim();
+    return [
+      `已按${role ? `岗位「${role.slice(0, 48)}」` : "岗位信息"}自动选择「${match.dossier.name}」简历。`,
+    ];
+  }
+  if (match.matchedByJob) {
+    return [`已识别岗位信息，但现有方向简历没有明显匹配信号，暂用「${match.dossier.name}」简历；请确认。`];
+  }
+  return [`页面未识别到岗位信息，暂用工作台当前的「${match.dossier.name}」简历；请确认方向。`];
 }
 
 function currentSiteKey(sender: chrome.runtime.MessageSender): string {

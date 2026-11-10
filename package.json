@@ -1,13 +1,14 @@
 {
   "name": "quill",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.4.14",
   "type": "module",
   "description": "Quill — an Apple-grade autofill copilot for job applications: browser extension + personal workbench.",
   "workspaces": [
     "packages/*",
     "extension",
-    "web"
+    "web",
+    "server"
   ],
   "scripts": {
     "build": "npm run build:extension",
@@ -18,11 +19,14 @@
     "dev:web": "npm run dev --workspace @quill/web",
     "test": "node scripts/test.mjs",
     "test:e2e": "node scripts/e2e.mjs",
+    "probe": "node scripts/probe.mjs",
     "test:all": "npm run typecheck && npm test && npm run build:extension && npm run test:e2e",
     "shot": "node scripts/shot.mjs",
     "browsers": "node scripts/browsers.mjs",
     "typecheck": "tsc -b --force",
-    "icons": "node scripts/icons.mjs"
+    "icons": "node scripts/icons.mjs",
+    "dev:server": "node server/src/index.mjs",
+    "server": "node server/src/index.mjs"
   },
   "engines": {
     "node": ">=20.11"

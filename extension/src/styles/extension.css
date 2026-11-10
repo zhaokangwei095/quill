@@ -358,6 +358,111 @@ button.q-item:hover {
   max-width: 52ch;
 }
 
+/* First-run setup block on the welcome page. It sits above the product tour
+   because the recognition choice is the only thing blocking first use. */
+.q-welcome-setup {
+  margin-top: var(--s-10);
+  padding: var(--s-6);
+  border-radius: var(--r-lg);
+  background: var(--bg-elevated);
+  box-shadow:
+    inset 0 0 0 var(--hairline-w) var(--line),
+    var(--shadow-sm);
+}
+
+.q-welcome-modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+}
+
+.q-welcome-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-3) var(--s-4);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-inset);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--d-fast) var(--ease-out),
+    box-shadow var(--d-fast) var(--ease-out);
+}
+
+.q-welcome-mode:hover {
+  background: var(--bg-hover);
+}
+
+.q-welcome-mode[data-active="true"] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.q-welcome-mode-label {
+  font-size: var(--text-sub);
+  font-weight: var(--weight-semibold);
+  color: var(--ink);
+}
+
+.q-welcome-mode-detail {
+  font-size: var(--text-cap);
+  line-height: var(--leading-sub);
+  color: var(--ink-secondary);
+}
+
+.q-welcome-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-4);
+  margin-top: var(--s-5);
+}
+
+.q-welcome-fields .q-hint {
+  grid-column: 1 / -1;
+}
+
+.q-welcome-note {
+  margin-top: var(--s-4);
+  font-size: var(--text-sub);
+  line-height: var(--leading-sub);
+  color: var(--ink-secondary);
+}
+
+.q-welcome-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+  font-size: var(--text-sub);
+  line-height: var(--leading-sub);
+  color: var(--red);
+}
+
+.q-welcome-error svg {
+  flex: none;
+  margin-top: 0.125rem;
+}
+
+.q-welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-top: var(--s-6);
+}
+
+@media (max-width: 34rem) {
+  .q-welcome-setup {
+    padding: var(--s-5);
+  }
+
+  .q-welcome-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------------------------------------------------------------- consent */
 
 .q-consent {

@@ -7,6 +7,7 @@ import {
   analyzeGaps,
   analyzeJd,
   createRecord,
+  detectJobRole,
   draftCoverLetter,
   extractHardRequirements,
   extractKeywords,
@@ -14,6 +15,8 @@ import {
   ledgerInsights,
   ledgerStats,
   ledgerToCsv,
+  matchDossierForJob,
+  makeDossier,
   nextSteps,
   parseResume,
   sortRecords,
@@ -80,6 +83,44 @@ function profileOf(): Profile {
 }
 
 /* ---------------------------------------------------------------------- JD */
+
+test("detectJobRole reads labelled, English and title-only first-line job names", () => {
+  assert.equal(detectJobRole("岗位名称：高级后端开发工程师（深圳）\n工作地点：深圳")?.value, "高级后端开发工程师");
+  assert.equal(detectJobRole("产品经理实习生 | 校园招聘\n岗位职责")?.value, "产品经理实习生");
+  assert.equal(detectJobRole("Position: Senior Product Designer\nResponsibilities")?.value, "Senior Product Designer");
+  assert.equal(detectJobRole("岗位：后端开发工程师\n任职要求")?.value, "后端开发工程师");
+  assert.equal(detectJobRole("岗位名称：数据科学家\n工作地点：上海")?.value, "数据科学家");
+});
+
+test("detectJobRole does not mistake a section heading for a job name", () => {
+  assert.equal(detectJobRole("岗位描述：负责核心交易系统开发\n1. 熟悉 Go"), undefined);
+  assert.equal(detectJobRole("岗位职责：参与方案评审\n任职要求\n1. 熟悉 Kubernetes"), undefined);
+});
+
+test("matchDossierForJob picks the direction whose resume matches the posting", () => {
+  const backend = parseResume(RESUME).profile;
+  const product = parseResume(RESUME).profile;
+  product.id = "product";
+  product.preference.position = "产品经理";
+  product.skills.items = ["需求分析", "竞品分析", "Axure", "Figma"];
+  product.experience = [
+    {
+      id: "product-exp",
+      title: "产品经理",
+      highlights: ["负责用户研究与需求分析，使用 Figma 输出交互原型"],
+    },
+  ];
+  const dossiers = [
+    makeDossier(backend, "后端开发", "backend"),
+    makeDossier(product, "产品经理", "product"),
+  ];
+  const jd = analyzeJd("岗位名称：产品经理\n任职要求\n1. 熟悉用户研究、需求分析与 Figma 原型设计");
+  const match = matchDossierForJob(dossiers, "backend", {
+    jobRole: jd.role,
+    jobText: jd.requirements.map((item) => item.text).join("\n"),
+  });
+  assert.equal(match.dossier?.id, "product");
+});
 
 test("analyzeJd separates requirements from responsibilities", () => {
   const jd = analyzeJd(JD);

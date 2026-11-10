@@ -9,8 +9,12 @@
 
 export * from "./types.js";
 export * from "./text.js";
+export * from "./profile.js";
+export * from "./profileMatch.js";
+export * from "./resume/reparse.js";
 export * from "./fields/index.js";
 export * from "./resume/index.js";
 export * from "./strategy/index.js";
 export * from "./tailor/index.js";
 export * from "./ledger/index.js";
+export * from "./diagnostics.js";

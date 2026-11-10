@@ -19,6 +19,8 @@ export interface WatchOptions {
   getProposed: (ref: string) => string[];
   isEnabled: () => Promise<boolean>;
   onObserved: (field: FieldDescriptor, value: string) => Promise<void>;
+  /** Re-scan after a person commits any field value, even if learning is off. */
+  onFieldCommitted?: (field: FieldDescriptor, value: string) => Promise<void>;
   /**
    * True while the extension is writing into the page.
    *
@@ -36,11 +38,13 @@ export interface WatchOptions {
 const IGNORED_INPUT_TYPES = new Set(["password", "hidden", "file", "submit", "button", "image", "reset"]);
 
 export function startLearningWatcher(options: WatchOptions): () => void {
-  let enabled = true;
+  let enabled = false;
   /** Debounce per element, so a blur followed by a change is one observation. */
   const recentlySeen = new WeakMap<HTMLElement, number>();
   /** Values we recorded, keyed by ref, so we do not re-report the same thing. */
   const lastReported = new Map<string, string>();
+  /** Values already re-scanned after commit; avoids duplicate blur/change scans. */
+  const lastCommitted = new Map<string, string>();
 
   void options
     .isEnabled()
@@ -52,7 +56,6 @@ export function startLearningWatcher(options: WatchOptions): () => void {
     });
 
   const handle = async (event: Event, element: HTMLElement): Promise<void> => {
-    if (!enabled) return;
     if (event.type === "input") return; // only `change` and `blur` reach here
 
     const inputType = element instanceof HTMLInputElement ? element.type.toLowerCase() : "";
@@ -72,21 +75,37 @@ export function startLearningWatcher(options: WatchOptions): () => void {
     if (!scan) return;
 
     const field = matchField(element, scan);
-    if (!field || !field.key || field.key === "unknown") return;
+    /*
+     * Unclassified fields are the ones learning exists for: 导师, 内推串码, an
+     * employer's own AI-tools question. `considerObservation` files them under a
+     * label-derived custom key, so filtering them out here discarded exactly the
+     * answers the person had to type by hand.
+     */
+    if (!field) return;
 
     const value = readRaw(element);
     if (!value) return;
 
-    // Never observe while we are the ones writing.
+    // Never observe or re-scan while the extension is the one writing.
     if (options.isFilling()) return;
 
-    // Never learn our own output, nor a value we have already reported.
+    // Never learn our own output, nor re-scan a duplicate commit.
     const proposed = options.getProposed(field.ref);
     if (proposed.some((candidate) => normalize(candidate) === normalize(value))) return;
-    if (lastReported.get(field.ref) === value) return;
-    lastReported.set(field.ref, value);
+    if (lastCommitted.get(field.ref) === value) return;
+    lastCommitted.set(field.ref, value);
 
-    await options.onObserved(field, value);
+    if (enabled && lastReported.get(field.ref) !== value) {
+      lastReported.set(field.ref, value);
+      try {
+        await options.onObserved(field, value);
+      } catch {
+        // A learning failure must not suppress the page re-scan.
+      }
+    }
+
+    // Updating the page is independent of the optional learning preference.
+    await options.onFieldCommitted?.(field, value);
   };
 
   const listener = (event: Event): void => {

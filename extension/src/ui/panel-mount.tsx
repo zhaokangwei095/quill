@@ -19,14 +19,16 @@
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import type { Decision, FillPlan, PageScan } from "@quill/core";
-import type { FillReport } from "../shared/protocol.js";
-import { Panel } from "./panel.js";
+import type { FillReport, SectionPlanItem } from "../shared/protocol.js";
+import { captureException } from "../shared/logger.js";
+import { Panel, type FocusFieldResult } from "./panel.js";
 
 export interface PanelApi {
   setPlan: (plan: FillPlan, summary: string) => void;
   setScan: (scan: PageScan) => void;
   setTally: (tally: Record<string, number>) => void;
   setReport: (report: FillReport) => void;
+  setSections: (sections: SectionPlanItem[]) => void;
   setBusy: (busy: boolean) => void;
   setError: (error: string | undefined) => void;
   open: () => Promise<void>;
@@ -42,7 +44,14 @@ export interface MountOptions {
   onRefresh: () => Promise<{ plan: FillPlan; summary: string }>;
   onApply: (refs?: string[]) => Promise<FillReport>;
   onRecord: () => Promise<{ ok: boolean }>;
+  onDiagnostics: () => Promise<{ ok: boolean; message?: string }>;
   onLearn: (decision: Decision, value: string) => Promise<{ ok: boolean }>;
+  /** Write one hand-typed answer straight into the page. */
+  onFillField: (decision: Decision, value: string) => Promise<{ ok: boolean; reason?: string }>;
+  /** Current manifest version, so the active content script is visible. */
+  version: string;
+  /** Scroll, focus and temporarily mark the source-page field. */
+  onFocusField: (decision: Decision) => FocusFieldResult;
 }
 
 const HOST_TAG = "quill-panel";
@@ -132,6 +141,7 @@ export function mountPanel(options: MountOptions): PanelApi {
     scan: undefined as PageScan | undefined,
     summary: "",
     report: undefined as FillReport | undefined,
+    sections: [] as SectionPlanItem[],
     busy: false,
     error: undefined as string | undefined,
     collapsed: false,
@@ -145,6 +155,8 @@ export function mountPanel(options: MountOptions): PanelApi {
         scan: state.scan,
         summary: state.summary,
         report: state.report,
+        sections: state.sections,
+        version: options.version,
         busy: state.busy,
         error: state.error,
         collapsed: state.collapsed,
@@ -159,6 +171,9 @@ export function mountPanel(options: MountOptions): PanelApi {
         onLearn: (decision, value) => {
           void learn(decision, value);
         },
+        onFocusField: (decision) => options.onFocusField(decision),
+        onRecord: () => options.onRecord(),
+        onDiagnostics: () => options.onDiagnostics(),
         onCollapse: (collapsed) => {
           state = { ...state, collapsed };
           render();
@@ -198,6 +213,7 @@ export function mountPanel(options: MountOptions): PanelApi {
       const { plan, summary } = await options.onRefresh();
       state = { ...state, plan, summary, busy: false };
     } catch (error) {
+      captureException("panel", "panel.refresh.failed", error);
       state = {
         ...state,
         busy: false,
@@ -214,34 +230,76 @@ export function mountPanel(options: MountOptions): PanelApi {
       const report = await options.onApply(refs);
       state = { ...state, busy: false, report };
     } catch (error) {
+      captureException("panel", "panel.apply.failed", error);
       state = { ...state, busy: false, error: error instanceof Error ? error.message : "填写失败" };
     }
     render();
   }
 
   async function learn(decision: Decision, value: string): Promise<void> {
+    /*
+     * Typing an answer for a field the profile does not cover is a request to
+     * answer that field, not merely to store it. So the whole operation is:
+     * remember it, write it into the page, then re-scan so the panel reflects
+     * the page and the new memory entry.
+     *
+     * Remembering comes first: if the page has re-rendered and the field is
+     * temporarily unreachable, the answer the person just typed should still
+     * survive.
+     */
+    state = { ...state, busy: true, error: undefined };
+    render();
+
+    let remembered = false;
     try {
-      await options.onLearn(decision, value);
-      // Reflect the new value locally so the row updates without a re-scan.
-      if (state.plan) {
-        const decisions = state.plan.decisions.map((item) =>
-          item.ref === decision.ref
-            ? {
-                ...item,
-                status: "ready" as const,
-                value: { text: value },
-                confidence: 1,
-                evidence: { source: "memory" as const, detail: "来自你刚刚填写的内容" },
-                rationale: "已记住你填写的内容",
-              }
-            : item,
-        );
-        state = { ...state, plan: { ...state.plan, decisions } };
-        render();
-      }
+      remembered = (await options.onLearn(decision, value)).ok;
     } catch {
-      // Learning is best-effort; a failure must not disrupt the person's work.
+      // Remembering is best-effort; filling the page is the immediate intent.
     }
+
+    const filled = await options.onFillField(decision, value).catch((error: unknown) => {
+      captureException("panel", "panel.fillField.failed", error, { label: decision.label });
+      return { ok: false, reason: "没能写入页面，可以手动填写这一项" };
+    });
+
+    /*
+     * Reflect the value locally before the re-scan. This keeps the row stable
+     * if learning is switched off — a scan has no source for a value that was
+     * deliberately not stored, and would flip the row back to “missing”.
+     */
+    if (state.plan) {
+      const decisions = state.plan.decisions.map((item) =>
+        item.ref === decision.ref
+          ? {
+              ...item,
+              status: "ready" as const,
+              value: { text: value },
+              confidence: 1,
+              evidence: {
+                source: "memory" as const,
+                detail: remembered ? "已填入页面，并记住这条内容" : "已填入页面",
+              },
+              rationale: remembered ? "已记住你填写的内容" : "使用你刚刚输入的内容",
+            }
+          : item,
+      );
+      state = { ...state, plan: { ...state.plan, decisions } };
+    }
+
+    if (!filled.ok) {
+      state = { ...state, busy: false, error: filled.reason ?? "没能写入页面，可以手动填写这一项" };
+      render();
+      return;
+    }
+
+    try {
+      const { plan, summary } = await options.onRefresh();
+      state = { ...state, plan, summary, busy: false };
+    } catch {
+      // The value is already in the page and reflected locally; scanning is best-effort.
+      state = { ...state, busy: false };
+    }
+    render();
   }
 
   /* ------------------------------------------------------------------ drag */
@@ -305,6 +363,10 @@ export function mountPanel(options: MountOptions): PanelApi {
     },
     setReport(report) {
       state = { ...state, report };
+      render();
+    },
+    setSections(sections) {
+      state = { ...state, sections };
       render();
     },
     setBusy(busy) {

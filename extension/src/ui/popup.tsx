@@ -46,19 +46,40 @@ function Popup(): JSX.Element {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.id === undefined) throw new Error("找不到当前标签页");
+      const tabId = tab.id;
 
       // The content script listens for a DOM event; sending a tab message is
       // more reliable because it survives the script being injected late.
-      const response = (await chrome.tabs.sendMessage(tab.id, { type: "scan" })) as
-        | ExtensionResponse
-        | undefined;
+      const request = async (): Promise<ExtensionResponse | undefined> =>
+        (await chrome.tabs.sendMessage(tabId, { type: "scan" })) as ExtensionResponse | undefined;
+
+      let response: ExtensionResponse | undefined;
+      try {
+        response = await request();
+      } catch {
+        /*
+         * Edge withholds host access by default and offers “单击时”: until the
+         * person clicks the action, no content script is running on the page.
+         * The click that opened this popup grants activeTab, so inject the same
+         * bundle now and retry once. The bundle has its own double-injection
+         * guard, so this is safe even if another copy is already present.
+         */
+        try {
+          await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+          response = await request();
+        } catch {
+          throw new Error(
+            "无法在当前页面识别表单。如果是 Chrome 内置页面或 PDF，请换一个网页试试。",
+          );
+        }
+      }
       if (!response || !response.ok) {
         throw new Error(
           "无法在当前页面识别表单。如果是 Chrome 内置页面或 PDF，请换一个网页试试。",
         );
       }
       // Bring the panel forward in that tab.
-      await chrome.tabs.sendMessage(tab.id, { type: "focus-panel" }).catch(() => {});
+      await chrome.tabs.sendMessage(tabId, { type: "focus-panel" }).catch(() => {});
       window.close();
     } catch (cause) {
       show(cause instanceof Error ? cause.message : "识别失败", "error");

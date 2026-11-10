@@ -8,10 +8,10 @@
 
 import { useCallback, useState, type JSX } from "react";
 import { createRoot } from "react-dom/client";
-import { DEFAULT_SETTINGS, type Settings } from "@quill/core";
+import { DEFAULT_SETTINGS, customModelReady, type Settings } from "@quill/core";
 import { useExtensionState, useToast } from "./hooks.js";
 import { download, send } from "./shared.js";
-import { Check, Download, Lock, Settings as SettingsIcon, Trash, Upload, Warning } from "./icons.js";
+import { Check, Download, Lock, Settings as SettingsIcon, Sparkle, Trash } from "./icons.js";
 
 function Options(): JSX.Element {
   const { state, loading, reload } = useExtensionState();
@@ -40,6 +40,13 @@ function Options(): JSX.Element {
   const exportData = useCallback(async () => {
     const response = await chrome.runtime.sendMessage({ type: "get-state" });
     if (!response?.ok) return;
+    const exportedSettings: Settings = {
+      ...response.state.settings,
+      // API keys are credentials, not data. A backup travels through chat apps
+      // and cloud drives, so it must never carry one.
+      model: { ...response.state.settings.model, apiKey: "", enabled: false },
+      resumeModel: { ...response.state.settings.resumeModel, betaCode: "" },
+    };
     const payload = JSON.stringify(
       {
         exportedAt: new Date().toISOString(),
@@ -49,13 +56,13 @@ function Options(): JSX.Element {
         analyses: response.state.analyses,
         reports: response.state.reports,
         records: response.state.records,
-        settings: response.state.settings,
+        settings: exportedSettings,
       },
       null,
       2,
     );
     download(`quill-backup-${new Date().toISOString().slice(0, 10)}.json`, payload, "application/json");
-    show("已导出为 JSON 文件", "success");
+    show("已导出（不包含 API Key 与访问码）", "success");
   }, [show]);
 
   const erase = useCallback(async () => {
@@ -145,6 +152,59 @@ function Options(): JSX.Element {
         />
       </Section>
 
+      <Section title="简历识别" description="默认本机解析；也可以启用识别服务或自己的模型。">
+        <Toggle
+          title="使用模型识别简历"
+          description="新上传简历的文字会发送到识别服务器做转写与结构化，扫描件和图片也能读取。服务器地址、访问码与连接测试在工作台的「设置 → 简历识别」里。"
+          checked={settings.resumeModel.enabled}
+          disabled={busy}
+          onChange={(checked) =>
+            void update({ resumeModel: { ...settings.resumeModel, enabled: checked } })
+          }
+        />
+        <div className="q-setting">
+          <div className="q-setting-body">
+            <div className="q-setting-title">我自己的模型</div>
+            <div className="q-setting-desc">
+              {customModelReady(settings.model)
+                ? `已启用：${settings.model?.model || "未命名模型"}。简历文字与岗位描述会直接从浏览器发往你填写的地址，密钥只保存在本机。`
+                : "使用 OpenAI / Anthropic 兼容接口读取文字简历、分析岗位描述。没有配置时不会发送任何请求。"}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="q-btn q-btn-outline"
+            onClick={() => {
+              void chrome.tabs.create({
+                url: chrome.runtime.getURL("pages/workbench.html#settings"),
+              });
+            }}
+          >
+            <Sparkle size={15} />
+            {customModelReady(settings.model) ? "查看配置" : "去配置"}
+          </button>
+        </div>
+        <div className="q-setting">
+          <div className="q-setting-body">
+            <div className="q-setting-title">重新运行模型引导</div>
+            <div className="q-setting-desc">
+              重新选择识别方式，填写服务器地址与访问码，或改用自己的模型。
+            </div>
+          </div>
+          <button
+            type="button"
+            className="q-btn q-btn-outline"
+            onClick={() => {
+              void chrome.tabs.create({
+                url: chrome.runtime.getURL("pages/workbench.html#setup"),
+              });
+            }}
+          >
+            打开引导
+          </button>
+        </div>
+      </Section>
+
       <Section title="外观" description="跟随系统，或固定为某一种。">
         <div className="q-setting">
           <div className="q-setting-body">
@@ -169,7 +229,7 @@ function Options(): JSX.Element {
         </div>
       </Section>
 
-      <Section title="你的数据" description="全部保存在这台设备的 Chrome 本地存储中。">
+      <Section title="你的数据" description="资料保存在这台设备的浏览器存储中；只有你选择的模型识别会把相应文字发出去。">
         <div className="q-setting">
           <div className="q-setting-body">
             <div className="q-setting-title">导出备份</div>
@@ -216,8 +276,13 @@ function Options(): JSX.Element {
       <div className="q-consent" style={{ marginTop: "var(--s-8)" }}>
         <Lock />
         <div>
-          Quill 不连接任何服务器。你的简历与填写内容不会离开这台设备，也不会被用于训练模型。
-          唯一的例外是你主动点击“导出”。
+          {settings.resumeModel.enabled && customModelReady(settings.model)
+            ? "资料保存在本机。可复制文字的简历会发给你配置的自定义模型，图片和扫描件会发到识别服务器；岗位分析会发给自定义模型。两个密钥都只保存在本机，可以随时关闭。"
+            : settings.resumeModel.enabled
+              ? "资料保存在本机。模型识别开启时，新上传简历的文字会发到你的识别服务器做转写与结构化；服务器不保存文件或结果。可在上面的开关里关闭，关闭后不产生任何识别请求。"
+              : customModelReady(settings.model)
+                ? "资料保存在本机。只有在你上传简历或分析岗位时，相应文字才会发给你配置的自定义模型；API Key 不会发送到 Quill 的服务器。"
+                : "Quill 不连接任何服务器。你的简历与填写内容不会离开这台设备，也不会被用于训练模型。唯一的例外是你主动点击“导出”。"}
         </div>
       </div>
 

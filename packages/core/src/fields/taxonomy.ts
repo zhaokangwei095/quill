@@ -232,7 +232,16 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     labelEn: "ID type",
     section: "identity",
     priority: 60,
-    aliases: ["证件类型", "身份证件类型", "身份类型", "id type", "document type", "certificate type"],
+    aliases: [
+      "证件类型",
+      "身份证件类型",
+      "个人证件",
+      "个人证件类型",
+      "身份类型",
+      "id type",
+      "document type",
+      "certificate type",
+    ],
   },
   {
     key: "identity.idNumber",
@@ -452,13 +461,16 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
       "当前城市",
       "居住城市",
       "目前所在地",
+      "当前所处地",
+      "目前所处地",
+      "现在所处地",
       "current city",
       "current location",
       "city of residence",
       "location",
       "居住地",
     ],
-    excludes: ["籍贯", "户口", "户籍", "出生地", "意向", "期望", "公司"],
+    excludes: ["籍贯", "户口", "户籍", "出生地", "意向", "期望", "公司", "就读"],
   },
   {
     key: "contact.address",
@@ -567,6 +579,12 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
       "emergency contact number",
       "emergencycontactphone",
     ],
+    /*
+     * A 证明人/推荐人 phone is a reference's number, not the emergency contact.
+     * Without this veto, a field labelled 联系电话 inside a reference block was
+     * answered with the emergency number as soon as contact.phone rejected it.
+     */
+    excludes: ["证明人", "推荐人", "reference", "referee"],
   },
   {
     key: "contact.emergencyRelation",
@@ -707,6 +725,14 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     ],
   },
   {
+    key: "education.current",
+    label: "至今（教育）",
+    labelEn: "Currently studying",
+    section: "education",
+    priority: 45,
+    aliases: ["至今", "目前仍在读", "当前在读", "仍在就读", "尚未毕业", "present", "currently studying"],
+  },
+  {
     key: "education.graduationStatus",
     label: "应届/往届",
     labelEn: "Fresh graduate status",
@@ -746,6 +772,31 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     section: "education",
     priority: 45,
     aliases: ["gpa", "平均绩点", "平均分", "成绩", "学业成绩", "加权平均分", "gpa成绩", "grade average"],
+    /*
+     * Tencent splits the value into GPA-GPA and GPA-BASE. The base field must
+     * win when both labels are present, otherwise "GPA-BASE" is read as a second
+     * GPA and answered with the next education record's GPA.
+     */
+    excludes: ["gpa-base", "gpa base", "满绩", "满分绩点", "绩点满分"],
+  },
+  {
+    key: "education.gpaBase",
+    label: "满绩绩点",
+    labelEn: "GPA scale / maximum",
+    section: "education",
+    priority: 40,
+    aliases: [
+      "gpa-base",
+      "gpa base",
+      "gpa满分",
+      "满绩",
+      "满绩点",
+      "满分绩点",
+      "绩点满分",
+      "gpa scale",
+      "maximum gpa",
+      "gpa out of",
+    ],
   },
   {
     key: "education.rank",
@@ -753,7 +804,7 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     labelEn: "Class rank",
     section: "education",
     priority: 40,
-    aliases: ["专业排名", "年级排名", "班级排名", "排名", "class rank", "ranking", "rank in class"],
+    aliases: ["专业排名", "年级排名", "班级排名", "成绩排名", "综合排名", "专业成绩排名", "排名", "class rank", "ranking", "rank in class"],
   },
   {
     key: "education.duration",
@@ -769,7 +820,17 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     labelEn: "School location",
     section: "education",
     priority: 25,
-    aliases: ["院校所在地", "学校所在地", "院校省市", "学校省市", "school location", "school city"],
+    aliases: [
+      "院校所在地",
+      "学校所在地",
+      "院校省市",
+      "学校省市",
+      "目前就读地",
+      "就读地",
+      "就读城市",
+      "school location",
+      "school city",
+    ],
   },
   {
     key: "education.level",
@@ -812,6 +873,43 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     priority: 30,
     kinds: ["file"],
     aliases: ["成绩单", "在校成绩单", "transcript", "academic transcript"],
+  },
+  /*
+   * Graduate-school extras that Tencent's campus resume asks for. They are not
+   * in a resume parser's usual vocabulary, but leaving them unclassified means
+   * the panel cannot even offer the person's own earlier answer from memory.
+   */
+  {
+    key: "education.advisor",
+    label: "导师",
+    labelEn: "Academic advisor",
+    section: "education",
+    priority: 20,
+    aliases: ["导师", "指导教师", "指导老师", "导师姓名", "研究生导师", "academic advisor", "advisor", "supervisor"],
+  },
+  {
+    key: "education.lab",
+    label: "实验室",
+    labelEn: "Laboratory",
+    section: "education",
+    priority: 15,
+    aliases: ["实验室", "所属实验室", "实验室名称", "lab", "laboratory"],
+  },
+  {
+    key: "education.researchDirection",
+    label: "研究方向",
+    labelEn: "Research area",
+    section: "education",
+    priority: 20,
+    aliases: ["研究方向", "研究领域", "研究课题", "research direction", "research area", "research interest"],
+  },
+  {
+    key: "education.papers",
+    label: "论文",
+    labelEn: "Publications",
+    section: "education",
+    priority: 20,
+    aliases: ["论文", "发表论文", "论文发表", "代表论文", "已发表论文", "publications", "papers", "thesis"],
   },
 
   /* ----------------------------------------------------------- experience */
@@ -890,6 +988,9 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
       "full time",
       "part time",
     ],
+    // "实习时长" and "每周可出勤天数" are availability questions, not the
+    // employment type of a past role. Without this the word 实习 alone won.
+    excludes: ["时长", "周期", "天数", "每周"],
   },
   {
     key: "work.city",
@@ -916,6 +1017,8 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
       "from",
       "起始时间",
     ],
+    // 最早可入职时间 is availability, not the start date of a past role.
+    excludes: ["最早", "可入职", "到岗"],
   },
   {
     key: "work.endDate",
@@ -934,6 +1037,14 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
       "to",
       "结束时间",
     ],
+  },
+  {
+    key: "work.current",
+    label: "至今（工作）",
+    labelEn: "Currently employed",
+    section: "experience",
+    priority: 45,
+    aliases: ["至今", "目前在职", "当前在职", "仍在职", "尚未离职", "present", "currently working"],
   },
   {
     key: "work.description",
@@ -1010,7 +1121,25 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     section: "experience",
     priority: 20,
     aliases: ["证明人", "证明人姓名", "推荐人", "介绍人", "reference name", "referee", "referrer"],
-    excludes: ["关系", "电话", "职位"],
+    excludes: ["关系", "电话", "职位", "身份", "职务"],
+  },
+  {
+    key: "work.refereeTitle",
+    label: "证明人身份",
+    labelEn: "Reference title",
+    section: "experience",
+    priority: 20,
+    aliases: [
+      "证明人身份",
+      "证明人职位",
+      "证明人职务",
+      "证明人岗位",
+      "证明人部门",
+      "推荐人职位",
+      "referee title",
+      "referee position",
+      "reference title",
+    ],
   },
   {
     key: "work.refereePhone",
@@ -1018,7 +1147,19 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     labelEn: "Reference phone",
     section: "experience",
     priority: 20,
-    aliases: ["证明人电话", "证明人联系方式", "推荐人电话", "reference phone", "referee contact"],
+    aliases: [
+      "证明人电话",
+      "证明人联系方式",
+      "证明人联系电话",
+      "证明人手机",
+      "证明人手机号",
+      "推荐人电话",
+      "reference phone",
+      "reference phone number",
+      "referee contact",
+      "referee phone",
+      "referee phone number",
+    ],
   },
   {
     key: "work.refereeRelation",
@@ -1049,12 +1190,29 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     excludes: ["公司", "学校"],
   },
   {
+    key: "project.category",
+    label: "项目类型",
+    labelEn: "Project type",
+    section: "project",
+    priority: 65,
+    kinds: ["select", "combobox", "radio-group"],
+    aliases: [
+      "项目类型",
+      "项目类别",
+      "项目性质",
+      "项目种类",
+      "project type",
+      "project category",
+      "type of project",
+    ],
+  },
+  {
     key: "project.role",
     label: "项目角色",
     labelEn: "Project role",
     section: "project",
     priority: 55,
-    aliases: ["项目角色", "担任角色", "项目职务", "承担角色", "project role", "role in project", "项目担任角色"],
+    aliases: ["项目角色", "担任角色", "项目职务", "承担角色", "在项目中担任的角色", "在项目中担任角色", "项目中的角色", "project role", "role in project", "项目担任角色"],
   },
   {
     key: "project.description",
@@ -1092,6 +1250,14 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     section: "project",
     priority: 40,
     aliases: ["项目结束时间", "项目截止时间", "project end date", "结束时间"],
+  },
+  {
+    key: "project.current",
+    label: "至今（项目）",
+    labelEn: "Project ongoing",
+    section: "project",
+    priority: 45,
+    aliases: ["至今", "项目进行中", "仍在进行", "尚未结项", "present", "ongoing"],
   },
   {
     key: "project.link",
@@ -1150,6 +1316,22 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     aliases: ["奖项", "获奖情况", "荣誉奖项", "所获奖项", "奖励情况", "awards", "honors", "prizes", "achievements"],
   },
   {
+    key: "skill.awardLevel",
+    label: "获奖级别",
+    labelEn: "Award level",
+    section: "skill",
+    priority: 20,
+    aliases: ["获奖类型", "奖项类型", "获奖级别", "奖项级别", "奖项等级", "奖励级别", "award level", "award type"],
+  },
+  {
+    key: "skill.awardDate",
+    label: "获奖时间",
+    labelEn: "Award date",
+    section: "skill",
+    priority: 15,
+    aliases: ["获奖时间", "获奖日期", "获得时间", "award date", "date of award"],
+  },
+  {
     key: "skill.language",
     label: "语言能力",
     labelEn: "Languages",
@@ -1159,6 +1341,11 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
       "语言能力",
       "外语水平",
       "外语等级",
+      "外语考试/等级",
+      "外语考试",
+      "外语考试等级",
+      "外语等级考试",
+      "外语水平考试",
       "英语水平",
       "语言水平",
       "英语等级",
@@ -1169,6 +1356,24 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
       "english level",
       "idiomas",
       "langues",
+    ],
+  },
+  {
+    key: "skill.languageScore",
+    label: "外语分数",
+    labelEn: "Language test score",
+    section: "skill",
+    priority: 25,
+    aliases: [
+      "外语分数",
+      "语言分数",
+      "外语成绩",
+      "语言成绩",
+      "外语考试分数",
+      "考试分数",
+      "language score",
+      "language test score",
+      "test score",
     ],
   },
   {
@@ -1186,6 +1391,25 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     section: "skill",
     priority: 30,
     aliases: ["计算机水平", "计算机等级", "计算机能力", "办公软件", "computer skills", "it skills"],
+  },
+  {
+    key: "skill.programming",
+    label: "开发语言",
+    labelEn: "Programming languages",
+    section: "skill",
+    priority: 40,
+    aliases: [
+      "开发语言",
+      "编程语言",
+      "熟悉语言",
+      "掌握语言",
+      "技术栈",
+      "编程技能",
+      "programming languages",
+      "programming language",
+      "tech stack",
+      "technical stack",
+    ],
   },
   {
     key: "skill.resumeFile",
@@ -1256,6 +1480,55 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     excludes: ["现居", "当前", "户口", "籍贯", "户籍"],
   },
   {
+    key: "preference.interviewCity",
+    label: "面试城市",
+    labelEn: "Interview city",
+    section: "preference",
+    priority: 45,
+    aliases: ["面试城市", "参加面试城市", "面试地点", "期望面试城市", "interview city", "interview location"],
+  },
+  {
+    key: "preference.businessUnit",
+    label: "意向事业群",
+    labelEn: "Preferred business unit",
+    section: "preference",
+    priority: 30,
+    aliases: ["事业群", "感兴趣的事业群", "意向事业群", "意向事业部", "事业部", "business unit", "business group"],
+  },
+  {
+    key: "preference.internshipDays",
+    label: "每周出勤天数",
+    labelEn: "Days available per week",
+    section: "preference",
+    priority: 40,
+    aliases: [
+      "每周可出勤天数",
+      "每周出勤天数",
+      "每周实习天数",
+      "可实习天数",
+      "实习天数",
+      "每周到岗天数",
+      "days per week",
+      "days available per week",
+    ],
+  },
+  {
+    key: "preference.internshipDuration",
+    label: "实习时长",
+    labelEn: "Internship duration",
+    section: "preference",
+    priority: 40,
+    aliases: ["实习时长", "可实习时长", "实习周期", "实习期限", "实习时间", "internship duration", "internship period"],
+  },
+  {
+    key: "preference.referralCode",
+    label: "内推码",
+    labelEn: "Referral code",
+    section: "preference",
+    priority: 25,
+    aliases: ["内推串码", "内推码", "推荐码", "内推编号", "referral code", "referral number"],
+  },
+  {
     key: "preference.salary",
     label: "期望薪资",
     labelEn: "Expected salary",
@@ -1287,6 +1560,10 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
       "最快到岗",
       "入职时间",
       "可入职时间",
+      "最早可入职时间",
+      "最早入职时间",
+      "最早到岗时间",
+      "可到岗日期",
       "预计到岗",
       "availability",
       "available from",
@@ -1508,6 +1785,45 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     aliases: ["兴趣爱好", "业余爱好", "请介绍你的爱好", "hobbies", "interests outside work"],
   },
   {
+    key: "essay.aiTools",
+    label: "常用 AI 工具与模型",
+    labelEn: "AI tools and models",
+    section: "essay",
+    priority: 40,
+    kinds: ["textarea", "contenteditable"],
+    aliases: [
+      "请列出你常用的ai工具&模型",
+      "请列出你常用的ai工具和模型",
+      "常用的ai工具及模型",
+      "常用ai工具与模型",
+      "ai工具&模型",
+      "ai工具及模型",
+      "ai工具和模型",
+      "ai tools and models",
+      "ai tools",
+      "ai models",
+    ],
+  },
+  {
+    key: "essay.aiProjects",
+    label: "与 AI 协作完成的项目",
+    labelEn: "Projects completed with AI",
+    section: "essay",
+    priority: 40,
+    kinds: ["textarea", "contenteditable"],
+    aliases: [
+      "请描述一个或多个你与ai协作完成的项目或任务",
+      "你与ai协作完成的项目",
+      "与ai协作完成的项目",
+      "与ai协作的项目",
+      "ai协作完成的项目",
+      "使用ai完成的项目",
+      "ai应用项目",
+      "ai project experience",
+      "projects completed with ai",
+    ],
+  },
+  {
     key: "essay.additional",
     label: "补充说明",
     labelEn: "Additional information",
@@ -1516,7 +1832,10 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     kinds: ["textarea", "contenteditable"],
     aliases: [
       "补充说明",
+      "补充信息",
       "其他补充",
+      "其他信息",
+      "其他说明",
       "还有什么想告诉我们",
       "additional information",
       "anything else",
@@ -1596,6 +1915,59 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     priority: 0,
     aliases: ["搜索", "查询", "search", "query", "filter", "筛选"],
   },
+  /*
+   * “无实习经历 / 无项目经历 / 无获奖信息” are declarations, not empty text
+   * fields. Tencent renders each as a checkbox labelled with the section name,
+   * which made 无项目经历 look like a project-description input: the panel
+   * proposed a whole project paragraph for a checkbox. These keys are
+   * deliberately hands-off. Whether the person truly has nothing in a section
+   * is their statement to make, not something a resume parser can infer.
+   */
+  {
+    key: "meta.noEducation",
+    label: "无教育经历",
+    labelEn: "No education history",
+    section: "meta",
+    priority: 25,
+    kinds: ["checkbox"],
+    aliases: ["无教育经历", "没有教育经历", "无学历经历", "no education history"],
+  },
+  {
+    key: "meta.noExperience",
+    label: "无实习经历",
+    labelEn: "No internship experience",
+    section: "meta",
+    priority: 25,
+    kinds: ["checkbox"],
+    aliases: [
+      "无实习经历",
+      "无工作经历",
+      "没有实习经历",
+      "没有工作经历",
+      "无工作经验",
+      "暂无实习经历",
+      "no internship experience",
+      "no work experience",
+    ],
+  },
+  {
+    key: "meta.noProjects",
+    label: "无项目经历",
+    labelEn: "No project experience",
+    section: "meta",
+    priority: 25,
+    kinds: ["checkbox"],
+    aliases: ["无项目经历", "没有项目经历", "无项目经验", "暂无项目经历", "no project experience"],
+  },
+  {
+    key: "meta.noAwards",
+    label: "无获奖信息",
+    labelEn: "No awards",
+    section: "meta",
+    priority: 25,
+    kinds: ["checkbox"],
+    aliases: ["无获奖信息", "无获奖经历", "无奖项", "没有获奖", "暂无获奖", "no awards", "no honors"],
+  },
 ];
 
 /** Fast lookup by canonical key. */
@@ -1625,8 +1997,22 @@ export function sectionOfKey(key: string | undefined): FieldSection {
   }
 }
 
+/** Declarations that a whole section is empty; only the person may make them. */
+export const ABSENCE_KEYS = new Set([
+  "meta.noEducation",
+  "meta.noExperience",
+  "meta.noProjects",
+  "meta.noAwards",
+]);
+
 /** Fields we must never fill automatically, whatever the value looks like. */
-export const NEVER_AUTOFILL_KEYS = new Set(["meta.captcha", "meta.agreement", "meta.submit", "meta.search"]);
+export const NEVER_AUTOFILL_KEYS = new Set([
+  "meta.captcha",
+  "meta.agreement",
+  "meta.submit",
+  "meta.search",
+  ...ABSENCE_KEYS,
+]);
 
 /** Multi-row sections: when a page shows several of these, index them. */
 export const REPEATABLE_SECTIONS: FieldSection[] = ["education", "experience", "project"];

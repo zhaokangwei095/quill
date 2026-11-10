@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>空白经历栏测试</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+        color: #1d1d1f;
+        background: #f5f5f7;
+      }
+      body {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 48px 28px 120px;
+      }
+      h1 {
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      fieldset {
+        border: 1px solid #d2d2d7;
+        border-radius: 14px;
+        padding: 20px 22px 24px;
+        background: #fff;
+      }
+      legend {
+        padding: 0 8px;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 10px 0;
+      }
+      .row label,
+      .lab {
+        width: 92px;
+        flex: none;
+        font-size: 13px;
+        color: #6e6e73;
+      }
+      input,
+      select {
+        flex: 1;
+        min-width: 0;
+        height: 36px;
+        padding: 0 10px;
+        border: 1px solid #d2d2d7;
+        border-radius: 8px;
+        font: inherit;
+        font-size: 14px;
+        background: #fff;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 12px;
+      }
+      td {
+        padding: 6px 8px 6px 0;
+      }
+      .add-row {
+        border: 1px dashed #0071e3;
+        border-radius: 8px;
+        padding: 9px 16px;
+        background: #f5f9ff;
+        color: #0071e3;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .add-row:hover {
+        background: #eaf3ff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>实习生申请表</h1>
+    <form>
+      <fieldset>
+        <legend>基本信息</legend>
+        <div class="row"><label for="name">姓名</label><input id="name" name="name" required /></div>
+        <div class="row"><label for="phone">手机号码</label><input id="phone" name="phone" type="tel" required /></div>
+        <div class="row"><label for="email">电子邮箱</label><input id="email" name="email" type="email" required /></div>
+      </fieldset>
+
+      <!-- Every section starts with no rows, exactly like the real ATS pages
+           this fixture exists to cover. -->
+      <fieldset data-repeat="education">
+        <legend>教育经历</legend>
+        <div class="rows"></div>
+        <button type="button" class="add-row">添加教育经历</button>
+      </fieldset>
+
+      <fieldset data-repeat="experience">
+        <legend>实习经历</legend>
+        <div class="rows"></div>
+        <button type="button" class="add-row">添加实习经历</button>
+      </fieldset>
+
+      <!-- The seeded profile has no projects. The panel must explain this
+           instead of opening a row it cannot fill. -->
+      <fieldset data-repeat="projects">
+        <legend>项目经历</legend>
+        <div class="rows"></div>
+        <button type="button" class="add-row">添加项目经历</button>
+      </fieldset>
+    </form>
+
+    <script>
+      const counters = { education: 0, experience: 0, projects: 0 };
+
+      document.querySelectorAll("[data-repeat]").forEach((section) => {
+        const kind = section.dataset.repeat;
+        const rows = section.querySelector(".rows");
+        const add = section.querySelector(".add-row");
+
+        add.addEventListener("click", () => {
+          const index = counters[kind];
+          counters[kind] += 1;
+
+          const table = document.createElement("table");
+          table.dataset.row = kind;
+
+          if (kind === "education") {
+            table.innerHTML = `
+              <tr>
+                <td class="lab">学校名称</td>
+                <td><input type="text" name="school[${index}]" /></td>
+                <td class="lab">专业</td>
+                <td><input type="text" name="major[${index}]" /></td>
+              </tr>
+              <tr>
+                <td class="lab">学历</td>
+                <td>
+                  <select name="degree[${index}]">
+                    <option value="">请选择</option>
+                    <option value="bachelor">本科</option>
+                    <option value="master">硕士研究生</option>
+                  </select>
+                </td>
+                <td class="lab">毕业时间</td>
+                <td><input type="text" name="gradDate[${index}]" placeholder="yyyy.MM" /></td>
+              </tr>`;
+          } else if (kind === "experience") {
+            table.innerHTML = `
+              <tr>
+                <td class="lab">公司名称</td>
+                <td><input type="text" name="company[${index}]" /></td>
+                <td class="lab">职位名称</td>
+                <td><input type="text" name="jobTitle[${index}]" /></td>
+              </tr>
+              <tr>
+                <td class="lab">开始时间</td>
+                <td><input type="text" name="workStart[${index}]" /></td>
+                <td class="lab">结束时间</td>
+                <td><input type="text" name="workEnd[${index}]" /></td>
+              </tr>`;
+          } else {
+            table.innerHTML = `
+              <tr>
+                <td class="lab">项目名称</td>
+                <td><input type="text" name="projectName[${index}]" /></td>
+                <td class="lab">担任角色</td>
+                <td><input type="text" name="projectRole[${index}]" /></td>
+              </tr>
+              <tr>
+                <td class="lab">开始时间</td>
+                <td><input type="text" name="projectStart[${index}]" /></td>
+                <td class="lab">结束时间</td>
+                <td><input type="text" name="projectEnd[${index}]" /></td>
+              </tr>`;
+          }
+
+          rows.appendChild(table);
+        });
+      });
+    </script>
+  </body>
+</html>

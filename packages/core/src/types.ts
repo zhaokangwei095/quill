@@ -105,7 +105,10 @@ export interface Education {
   dates?: DateRange;
   /** 学制 */
   duration?: string;
+  /** 绩点。可能带满分，如 "4.0/5.0"，表单要求分栏时由 resolve 拆分。 */
   gpa?: string;
+  /** 满绩绩点，如 "5.0"（部分 ATS 把 GPA 与 GPA-BASE 分成两个框） */
+  gpaBase?: string;
   /** 专业排名，如 "3/120" */
   rank?: string;
   /** 是否统招 / 全日制 */
@@ -119,6 +122,11 @@ export interface Education {
   /** 是否海外经历 */
   overseas?: boolean;
 }
+
+export type HiringTrack = "internship" | "campus" | "experienced" | "unknown";
+
+/** The category a repeatable experience section explicitly asks for, when known. */
+export type ExperienceKind = "internship" | "employment";
 
 export interface Experience {
   id: string;
@@ -150,9 +158,49 @@ export interface Experience {
   refereeRelation?: string;
 }
 
+/**
+ * What kind of project this is.
+ *
+ * Application forms that ask for a project type usually offer a closed list.
+ * Training/course projects are intentionally not a category of their own: they
+ * add little on a resume, while research, open source and personal work are
+ * the distinctions a recruiter actually reads for.
+ */
+export type ProjectCategory = "research" | "opensource" | "personal" | "other";
+
+export const PROJECT_CATEGORIES: ProjectCategory[] = [
+  "research",
+  "opensource",
+  "personal",
+  "other",
+];
+
+export const PROJECT_CATEGORY_LABELS: Record<ProjectCategory, string> = {
+  research: "科研项目",
+  opensource: "开源项目",
+  personal: "个人作品",
+  other: "其他",
+};
+
+/** Accept the labels models and forms use, and collapse them to one value. */
+export function normalizeProjectCategory(value: unknown): ProjectCategory | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim().toLowerCase();
+  if (!text) return undefined;
+  if (/科研|研究|学术|课题|论文|research|academic/.test(text)) return "research";
+  if (/开源|open.?source|github|gitee|gitlab/.test(text)) return "opensource";
+  if (/个人作品|个人项目|作品集|个人开发|portfolio|personal|side.?project/.test(text)) {
+    return "personal";
+  }
+  if (/其他|其它|other|课程|实训|竞赛|比赛|training|course/.test(text)) return "other";
+  return undefined;
+}
+
 export interface Project {
   id: string;
   name?: string;
+  /** 科研 / 开源 / 个人作品 */
+  category?: ProjectCategory;
   role?: string;
   dates?: DateRange;
   /** 项目背景 / 目标 */
@@ -182,8 +230,15 @@ export interface JobPreference {
   salary?: string;
   /** 到岗时间 */
   availableFrom?: string;
-  /** 求职类型 */
+  /** 求职类型（全职 / 实习等），网申字段的值 */
   jobType?: string;
+  /**
+   * 这份简历主要投递的招聘类型。
+   *
+   * 页面自身能识别实习/校招/社招时以页面为准；页面没有明确类型时，用它决定
+   * 优先读取哪一类经历。未设置表示不按类型过滤。
+   */
+  targetTrack?: Exclude<HiringTrack, "unknown">;
   /** 是否接受调剂 / 出差 / 加班 */
   relocation?: string;
   travel?: string;
@@ -225,6 +280,8 @@ export interface Profile {
   essays: Essays;
   /** Verbatim text of the source document, for evidence quoting. */
   rawText?: string;
+  /** Latest parser warnings to review alongside manually checked fields. */
+  parseWarnings?: string[];
 }
 
 export function emptyProfile(id = "profile-1"): Profile {
@@ -240,6 +297,39 @@ export function emptyProfile(id = "profile-1"): Profile {
     preference: { cities: [], industries: [] },
     essays: { unclassified: {} },
   };
+}
+
+/**
+ * A named direction ("后端开发", "产品经理", "海外岗位") with its own copy of
+ * the profile.
+ *
+ * Directions are separate dossiers rather than a tag on one profile because the
+ * differences are not only in 求职意向: the same person will foreground
+ * different projects, rewrite the self-introduction, and list different skills
+ * for each direction. Editing one must not silently change what gets submitted
+ * for another. Each dossier stores its own independently uploaded resume.
+ */
+export interface ProfileDossier {
+  id: string;
+  name: string;
+  profile: Profile;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * What the UI needs to render the direction switcher without transferring every
+ * dossier's full text (which includes the resume verbatim).
+ */
+export interface ProfileSummary {
+  id: string;
+  name: string;
+  updatedAt: number;
+  /** 求职意向岗位, when the dossier has one. */
+  position?: string;
+  educationCount: number;
+  experienceCount: number;
+  projectCount: number;
 }
 
 /* -------------------------------------------------------------------- field */
@@ -322,9 +412,21 @@ export interface FieldDescriptor {
   pattern?: string;
   inputType?: string;
   options?: FieldOption[];
+  /**
+   * The control accepts several choices from `options`.
+   *
+   * A custom multi-select often hides behind a plain read-only `<input>` with a
+   * tag list beside it, so the element's own tag says "text" while the widget
+   * is really a multi-value picker. Without this flag the resolver matches the
+   * whole list against one option and, finding several equally good candidates,
+   * gives up.
+   */
+  multiple?: boolean;
   section: FieldSection;
   /** Nearest heading text, for context and grouping. */
   groupHeading?: string;
+  /** Explicitly identified experience section type, when its heading says so. */
+  experienceKind?: ExperienceKind;
   /** Detected widget library, used to pick the right fill technique. */
   framework?: WidgetFramework;
   /** Canonical key from the classifier, e.g. `contact.phone`. */
@@ -357,8 +459,21 @@ export interface PageScan {
   fields: FieldDescriptor[];
   /** Detected application system, if we recognise it. */
   ats?: string;
+  /** Hiring track inferred from page title, route and prominent page text. */
+  hiringTrack?: HiringTrack;
+  /** Job posting text extracted from the visible page, without form values. */
+  jobContext?: string;
   /** Progress indicator text the page itself shows, when present. */
   pageProgress?: string;
+  /**
+   * What the page expects in its education section.
+   *
+   * `current-only` — a single “当前教育经历 / 最高学历” block (Tencent). Fill the
+   * highest/current record and do not open older rows.
+   * `full-history` — a repeatable “教育经历” section that expects every degree.
+   * `unknown` — no clear wording; fill the rows the page already shows.
+   */
+  educationPolicy?: "current-only" | "full-history" | "unknown";
 }
 
 /* ----------------------------------------------------------------- evidence */
@@ -509,6 +624,14 @@ export interface DocumentRecord {
   uploadedAt: number;
   /** Marked when the person edits the extracted text by hand. */
   editedAt?: number;
+  /**
+   * How this document's profile was produced.
+   *
+   * `model` means OCR and/or structured extraction ran on the recognition
+   * server; `local` means only on-device rules were used. Older records have no
+   * value, which is also treated as local.
+   */
+  extractionMethod?: "model" | "local";
 }
 
 /* ------------------------------------------------------------- tailoring */
@@ -589,6 +712,10 @@ export interface TailorReport {
   id: string;
   jdAnalysisId: string;
   profileId: string;
+  /** Direction dossier id, when the report was built from an auto-matched resume. */
+  dossierId?: string;
+  /** Direction name shown alongside the report, so its source is auditable. */
+  dossierName?: string;
   createdAt: number;
   /** The one-line positioning statement. */
   headline: string;
@@ -621,18 +748,72 @@ export interface Settings {
   highlightFilled: boolean;
   /** Compose long-form answers from resume material. */
   composeEssays: boolean;
-  /** Optional model endpoint for deeper rewriting. */
+  /** Server-side OCR and structured resume extraction. */
+  resumeModel: ResumeModelSettings;
+  /**
+   * The person's own OpenAI- or Anthropic-compatible endpoint.
+   *
+   * Used in the browser for text-only resume structure extraction and job
+   * analysis. The key never goes to Quill's recognition server.
+   */
   model?: ModelConfig;
+  /** Whether the first-run setup has been completed or explicitly skipped. */
+  setupCompleted?: boolean;
+  /** Which path the person chose in the first-run setup. */
+  setupMode?: "quill" | "custom" | "local";
 }
 
+/**
+ * Recognition-server settings.
+ *
+ * The server holds the platform key; the browser never sees it. `consentShown`
+ * records that the person accepted the upload notice once. Until it is true,
+ * every import stops and asks before sending anything.
+ */
+export interface ResumeModelSettings {
+  /**
+   * Off by default in the public build: local rules work without any network.
+   * Turning this on sends new resume text to the configured recognition server.
+   */
+  enabled: boolean;
+  /** Recognition server root, no trailing slash. */
+  baseUrl: string;
+  /** Private-beta access code sent as `X-Quill-Beta`; empty when not needed. */
+  betaCode?: string;
+  /** The person has seen and accepted the upload notice at least once. */
+  consentShown: boolean;
+}
+
+/**
+ * Empty in the public build. Local rules need no server; people who choose the
+ * hosted recognition service enter the address provided to them. During local
+ * server development, set this to `http://127.0.0.1:8787`.
+ */
+export const DEFAULT_RESUME_MODEL_BASE_URL = "";
+
+export type ModelProtocol = "openai" | "anthropic";
+
 export interface ModelConfig {
-  /** OpenAI-compatible base URL. */
+  /** Which request/response shape the endpoint speaks. */
+  protocol?: ModelProtocol;
+  /** Base URL, normally ending at the provider's API root. */
   baseUrl: string;
   apiKey: string;
   model: string;
   /** 0-2 */
   temperature: number;
+  /** Off by default: a partially filled config must never be used. */
+  enabled?: boolean;
 }
+
+export const DEFAULT_MODEL_CONFIG: ModelConfig = {
+  protocol: "openai",
+  baseUrl: "",
+  apiKey: "",
+  model: "",
+  temperature: 0.2,
+  enabled: false,
+};
 
 export const DEFAULT_SETTINGS: Settings = {
   appearance: "system",
@@ -643,7 +824,47 @@ export const DEFAULT_SETTINGS: Settings = {
   preserveExisting: true,
   highlightFilled: true,
   composeEssays: true,
+  resumeModel: {
+    enabled: false,
+    baseUrl: DEFAULT_RESUME_MODEL_BASE_URL,
+    betaCode: "",
+    consentShown: false,
+  },
+  model: { ...DEFAULT_MODEL_CONFIG },
+  setupCompleted: false,
 };
+
+/**
+ * Deep-merge the two settings objects that have their own shape.
+ *
+ * Storage merges settings with a shallow spread, which would replace
+ * `resumeModel` wholesale and turn old saved objects into missing fields. Every
+ * load path goes through here instead.
+ */
+export function normalizeSettings(settings?: Partial<Settings>): Settings {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...(settings ?? {}),
+    resumeModel: {
+      ...DEFAULT_SETTINGS.resumeModel,
+      ...(settings?.resumeModel ?? {}),
+    },
+    model: {
+      ...DEFAULT_MODEL_CONFIG,
+      ...(settings?.model ?? {}),
+    },
+  };
+}
+
+/** A complete custom-model configuration that is safe to call. */
+export function customModelReady(model?: ModelConfig): boolean {
+  return Boolean(
+    model?.enabled &&
+      model.baseUrl.trim().length > 0 &&
+      model.apiKey.trim().length > 0 &&
+      model.model.trim().length > 0,
+  );
+}
 
 /* ------------------------------------------------------------------ helpers */
 

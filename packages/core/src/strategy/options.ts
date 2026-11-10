@@ -131,6 +131,52 @@ function numericValue(input: string): number | undefined {
   return numericTokens(input)[0];
 }
 
+/**
+ * Turn a class rank into a percentile.
+ *
+ * Chinese forms often ask for a band (“前5% / 前10% / 前20% / 其他”) while the
+ * resume stores a concrete rank (“6/140”, “第 6 名 / 共 140 人”). Comparing the
+ * numbers directly found nothing, so a required 成绩排名 select stayed empty
+ * even though the answer was derivable from the profile.
+ */
+function percentileOf(input: string): number | undefined {
+  const fraction = input.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
+  if (fraction) {
+    const numerator = Number(fraction[1]);
+    const denominator = Number(fraction[2]);
+    if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
+      return (numerator / denominator) * 100;
+    }
+  }
+
+  const percent = input.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (percent) {
+    const value = Number(percent[1]);
+    if (Number.isFinite(value)) return value;
+  }
+
+  const rank = input.match(/第\s*(\d+)\s*名/);
+  if (rank) {
+    const total = input.match(/(?:共|总人数|总计|of)\s*(\d+)/);
+    if (total && Number(total[1]) > 0) {
+      return (Number(rank[1]) / Number(total[1])) * 100;
+    }
+  }
+  return undefined;
+}
+
+/** The upper edge of a “前 10% / top 10%” option, or undefined. */
+function percentileBand(label: string): number | undefined {
+  const match = label.match(/(?:前|top)\s*(\d+(?:\.\d+)?)\s*%/i);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function isOtherOption(label: string): boolean {
+  return /^(其他|其它|other)$/i.test(normalize(label));
+}
+
 /** 0-1 score for how well `value` means `option`. */
 export function scoreOption(value: FieldValue, option: FieldOption): number {
   const optionLabel = option.label || option.value;
@@ -224,6 +270,38 @@ export function matchOption(
 
   const searchable = options.filter((option) => !option.disabled);
   if (searchable.length === 0) return undefined;
+
+  /*
+   * Percentile bands first: they are a closed vocabulary (“前5% / 前10% /
+   * 前20%”), and the profile's “6/140” has to be converted before ordinary
+   * string scoring can see it. Only engage when the option list really contains
+   * bands, so a stray percentage never turns an unrelated “其他” into a match.
+   */
+  const percentile = [value.text, value.raw]
+    .filter((item): item is string => Boolean(item))
+    .map(percentileOf)
+    .find((item): item is number => item !== undefined);
+  if (percentile !== undefined) {
+    const bands: Array<{ option: FieldOption; band: number }> = [];
+    for (const option of searchable) {
+      const band = percentileBand(option.label || option.value);
+      if (band !== undefined) bands.push({ option, band });
+    }
+    if (bands.length > 0) {
+      const containing = bands
+        .filter((entry) => percentile <= entry.band + 1e-9)
+        .sort((a, b) => a.band - b.band)[0];
+      if (containing) {
+        return {
+          value: containing.option.value,
+          label: containing.option.label,
+          confidence: 0.94,
+        };
+      }
+      const other = searchable.find((option) => isOtherOption(option.label));
+      if (other) return { value: other.value, label: other.label, confidence: 0.88 };
+    }
+  }
 
   const scored = searchable
     .map((option) => ({

@@ -489,18 +489,46 @@ function isMandatoryByPosition(kind: string | undefined, requirement: string): b
   return isMustHave(requirement);
 }
 
-/** Best-effort job title from the posting's first lines or a labelled field. */
-function guessRole(text: string): string | undefined {
-  const lines = toLines(text).slice(0, 8);
+/** Best-effort job title from a labelled field or the first job-like line. */
+export function guessRole(text: string): string | undefined {
+  return detectJobRole(text)?.value;
+}
+
+const ROLE_FIELD_PATTERN =
+  /(?:招聘岗位|职位名称|岗位名称|应聘岗位|招聘职位|岗位(?!描述|职责|要求|介绍|概述|信息|类别|性质|地点)|职位(?!描述|职责|要求|介绍|概述|信息|类别|性质|地点)|position|job ?title)\s*[:：]\s*([^\n|｜,，;；]{2,40})/i;
+const ROLE_WORD =
+  /(工程师|经理|专员|主管|总监|设计师|开发|运营|分析|顾问|助理|实习生|研究员|招聘|产品|测试|架构|teacher|engineer|manager|analyst|designer|developer|intern|specialist)/i;
+const JD_SECTION_LABEL = /^(?:岗位|职位|招聘)(?:描述|职责|要求|介绍|概述|信息|说明|内容)/i;
+
+/** A labelled job title outranks an unlabelled first line in a pasted posting. */
+export function detectJobRole(text: string): { value: string; labelled: boolean } | undefined {
+  const lines = toLines(text).slice(0, 16);
   for (const line of lines) {
-    const labelled = line.match(/(?:岗位|职位|招聘职位|position|job title)[:：]\s*(.{2,30})/i);
-    if (labelled?.[1]) return labelled[1].trim();
+    const labelled = line.match(ROLE_FIELD_PATTERN);
+    const value = cleanRole(labelled?.[1]);
+    if (value) return { value, labelled: true };
   }
-  const first = lines[0];
-  if (first && /(工程师|经理|专员|主管|设计师|开发|运营|分析|顾问|助理|实习生|研究员|招聘|产品|测试|teacher|engineer|manager|analyst|designer|developer|intern|specialist)/i.test(first)) {
-    return first.replace(/[（(].*?[)）]/g, "").trim().slice(0, 40);
+  const first = lines.find((line) => !JD_SECTION_LABEL.test(line.trim()))?.trim();
+  if (first && first.length <= 40 && ROLE_WORD.test(first)) {
+    const value = cleanRole(first);
+    if (value) return { value, labelled: false };
   }
   return undefined;
+}
+
+function cleanRole(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const cleaned = tidy(value)
+    .replace(/^(?:岗位|职位)(?:描述|职责|要求|介绍|概述)\s*[:：]?\s*/i, "")
+    .replace(/[（(].*?[)）]/g, "")
+    .replace(/(校园招聘|社会招聘|实习招聘|校招|社招|实习)$/i, "")
+    .replace(/[|｜].*$/, "")
+    .replace(/\s+(?:工作地点|岗位职责|任职要求|岗位描述)\s*[:：]?.*$/i, "")
+    .replace(/[：:]\s*$/, "")
+    .trim()
+    .slice(0, 40);
+  if (cleaned.length < 2 || /(?:岗位|职位)(?:描述|职责|要求|介绍|概述)/i.test(cleaned)) return undefined;
+  return cleaned;
 }
 
 /** Extract city from a raw posting when it is stated as a field. */

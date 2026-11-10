@@ -25,6 +25,9 @@ export interface TailorOptions {
   /** Override the role label used in the headline and cover letter. */
   role?: string;
   company?: string;
+  /** Direction dossier this report was built from. */
+  dossierId?: string;
+  dossierName?: string;
   /** Tone of the rewrite. */
   tone?: "concise" | "detailed";
   /** Cap on bullets per section. */
@@ -563,6 +566,8 @@ export function tailorResume(profile: Profile, jd: JdAnalysis, options: TailorOp
     id: `tailor-${Date.now().toString(36)}`,
     jdAnalysisId: jd.id,
     profileId: profile.id,
+    ...(options.dossierId ? { dossierId: options.dossierId } : {}),
+    ...(options.dossierName ? { dossierName: options.dossierName } : {}),
     createdAt: Date.now(),
     headline: positioning(profile, jd, options.company),
     summary: summaryParagraph(profile, jd, options.company),

@@ -25,6 +25,8 @@ const COMPOSABLE = new Set([
   "essay.achievement",
   "essay.challenge",
   "essay.hobby",
+  "essay.aiTools",
+  "essay.aiProjects",
   "essay.additional",
 ]);
 
@@ -91,6 +93,81 @@ function terminate(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
   return /[。！？.!?；;]$/.test(trimmed) ? trimmed : `${trimmed}。`;
+}
+
+/**
+ * AI tools and models we can recognise by name.
+ *
+ * Employers now ask “请列出你常用的 AI 工具&模型” as its own required question
+ * (Tencent's AI应用技能 section does). The answer has to come from the person's
+ * own material, so this only ever reports names that literally appear in the
+ * resume or a project — never a generic “ChatGPT 等”.
+ */
+const AI_TOOL_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
+  { name: "GitHub Copilot", pattern: /github\s*copilot/i },
+  { name: "Claude Code", pattern: /claude\s*code/i },
+  { name: "Claude", pattern: /claude/i },
+  { name: "Cursor", pattern: /cursor/i },
+  { name: "ChatGPT", pattern: /chatgpt/i },
+  { name: "GPT", pattern: /\bgpt(?:[-\s]?\d+(?:\.\d+)?)?\b/i },
+  { name: "Gemini", pattern: /gemini/i },
+  { name: "DeepSeek", pattern: /deepseek/i },
+  { name: "Coze", pattern: /coze/i },
+  { name: "Dify", pattern: /dify/i },
+  { name: "Midjourney", pattern: /midjourney/i },
+  { name: "Stable Diffusion", pattern: /stable\s*diffusion/i },
+  { name: "Windsurf", pattern: /windsurf/i },
+  { name: "Cline", pattern: /cline/i },
+  { name: "Trae", pattern: /trae/i },
+  { name: "通义千问", pattern: /通义千问|通义/i },
+  { name: "文心一言", pattern: /文心一言|文心/i },
+  { name: "豆包", pattern: /豆包/i },
+  { name: "Kimi", pattern: /\bkimi\b/i },
+  { name: "智谱清言", pattern: /智谱|chatglm/i },
+  { name: "腾讯混元", pattern: /混元/i },
+  { name: "讯飞星火", pattern: /讯飞星火|星火/i },
+  { name: "Perplexity", pattern: /perplexity/i },
+  { name: "Codex", pattern: /\bcodex\b/i },
+];
+
+function aiToolsIn(texts: string[]): string[] {
+  const found: string[] = [];
+  for (const text of texts) {
+    if (!text) continue;
+    for (const tool of AI_TOOL_PATTERNS) {
+      // “ChatGPT” already names the model; adding “GPT” beside it is noise.
+      if (tool.name === "GPT" && /chatgpt/i.test(text)) continue;
+      if (tool.pattern.test(text) && !found.includes(tool.name)) found.push(tool.name);
+    }
+  }
+  return found;
+}
+
+function projectText(project: Project): string {
+  return [project.name, project.summary, ...(project.stack ?? []), ...project.highlights]
+    .filter((part): part is string => Boolean(part))
+    .join(" ");
+}
+
+/** Does this project actually involve AI, or just contain the letters “ai”? */
+const AI_PROJECT_PATTERN =
+  /(人工智能|\bai\b|\bllm\b|大模型|语言模型|机器学习|深度学习|chatgpt|claude|copilot|deepseek|cursor|coze|dify|rag|prompt|模型微调|智能体)/i;
+
+function collectProfileAiTools(profile: Profile): string[] {
+  return aiToolsIn([
+    ...profile.skills.items,
+    ...profile.projects.flatMap((item) => [
+      item.name ?? "",
+      item.summary ?? "",
+      ...(item.stack ?? []),
+      ...item.highlights,
+    ]),
+    ...profile.experience.flatMap((item) => [
+      item.company ?? "",
+      item.title ?? "",
+      ...item.highlights,
+    ]),
+  ]);
 }
 
 /**
@@ -248,6 +325,33 @@ export function composeAnswer(
     case "essay.hobby": {
       if (profile.skills.interests.length === 0) return undefined;
       return `${profile.skills.interests.join("、")}。`;
+    }
+
+    case "essay.aiTools": {
+      const tools = collectProfileAiTools(profile);
+      if (tools.length === 0) return undefined;
+      return `我常用的 AI 工具与模型：${tools.join("、")}。`;
+    }
+
+    case "essay.aiProjects": {
+      const candidate = profile.projects.find((item) => AI_PROJECT_PATTERN.test(projectText(item)));
+      if (!candidate) return undefined;
+
+      const tools = aiToolsIn([
+        candidate.name ?? "",
+        candidate.summary ?? "",
+        ...(candidate.stack ?? []),
+        ...candidate.highlights,
+      ]);
+      const goal = candidate.summary?.trim() || bestHighlights(candidate.highlights, 1)[0] || candidate.name;
+      const highlights = bestHighlights(candidate.highlights, 3).filter((text) => text !== goal);
+      if (!goal) return undefined;
+
+      const parts: string[] = [`项目目标：${terminate(goal)}`];
+      if (tools.length > 0) parts.push(`使用的 AI 工具与模型：${tools.join("、")}。`);
+      if (candidate.role) parts.push(`我的角色：${terminate(candidate.role)}`);
+      if (highlights.length > 0) parts.push(`我负责的工作：${highlights.map(terminate).join("")}`);
+      return parts.length > 1 ? joinSentences(parts) : undefined;
     }
 
     case "essay.additional": {

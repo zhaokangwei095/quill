@@ -7,7 +7,7 @@
  * stale applications surface first, and a row opens into its full history.
  */
 
-import { useCallback, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   addNote,
   advanceStage,
@@ -257,6 +257,7 @@ export function LedgerView({ onToast }: { onToast: Toast }): JSX.Element {
 
       {open && (
         <RecordSheet
+          key={open.id}
           record={open}
           onClose={() => setOpenId(undefined)}
           onToast={onToast}
@@ -294,6 +295,22 @@ function StageChip({ stage }: { stage: ApplicationStage }): JSX.Element {
   return <span className={`q-chip ${tone}`}>{STAGE_LABELS[stage]}</span>;
 }
 
+interface BasicsDraft {
+  company: string;
+  role: string;
+  city: string;
+  salary: string;
+}
+
+function basicsOf(record: ApplicationRecord): BasicsDraft {
+  return {
+    company: record.company,
+    role: record.role,
+    city: record.city ?? "",
+    salary: record.salary ?? "",
+  };
+}
+
 function RecordSheet({
   record,
   onClose,
@@ -307,6 +324,21 @@ function RecordSheet({
   const [note, setNote] = useState("");
   const [action, setAction] = useState("");
 
+  /*
+   * The basics are edited locally and persisted on a short debounce (and on
+   * blur). Writing to the store on every keystroke re-rendered the controlled
+   * inputs while a Chinese IME was still composing, which committed the pinyin
+   * ("tengxun") and swallowed characters. Keeping a synchronous local draft
+   * fixes that; merging the draft into every other update means a stage click
+   * cannot overwrite half-typed text with the stale record.
+   */
+  const [basics, setBasics] = useState<BasicsDraft>(() => basicsOf(record));
+  const basicsRef = useRef(basics);
+  const committedRef = useRef(basics);
+  const recordRef = useRef(record);
+  const saveTimer = useRef<number | undefined>(undefined);
+  recordRef.current = record;
+
   const update = useCallback(
     async (next: ApplicationRecord) => {
       await getStore().saveRecord(next);
@@ -314,6 +346,76 @@ function RecordSheet({
     },
     [reload],
   );
+
+  const mergeBasics = useCallback((base: ApplicationRecord): ApplicationRecord => {
+    const draft = basicsRef.current;
+    return {
+      ...base,
+      company: draft.company,
+      role: draft.role,
+      city: draft.city || undefined,
+      salary: draft.salary || undefined,
+      updatedAt: Date.now(),
+    };
+  }, []);
+
+  const saveNow = useCallback(
+    (base: ApplicationRecord) => {
+      if (saveTimer.current !== undefined) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = undefined;
+      }
+      committedRef.current = basicsRef.current;
+      void update(mergeBasics(base));
+    },
+    [mergeBasics, update],
+  );
+
+  const commitBasics = useCallback(() => {
+    if (committedRef.current === basicsRef.current) {
+      if (saveTimer.current !== undefined) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = undefined;
+      }
+      return;
+    }
+    saveNow(recordRef.current);
+  }, [saveNow]);
+
+  const editBasics = useCallback(
+    (patch: Partial<BasicsDraft>) => {
+      const next = { ...basicsRef.current, ...patch };
+      basicsRef.current = next;
+      setBasics(next);
+      if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(() => {
+        saveTimer.current = undefined;
+        saveNow(recordRef.current);
+      }, 600);
+    },
+    [saveNow],
+  );
+
+  const applyRecord = useCallback(
+    (base: ApplicationRecord) => {
+      saveNow(base);
+    },
+    [saveNow],
+  );
+
+  const cancelPending = useCallback(() => {
+    if (saveTimer.current !== undefined) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = undefined;
+    }
+  }, []);
+
+  useEffect(() => () => cancelPending(), [cancelPending]);
+
+  const closeSheet = useCallback(() => {
+    commitBasics();
+    onClose();
+  }, [commitBasics, onClose]);
 
   const stageProgress = useMemo(() => {
     const sequence: ApplicationStage[] = ["draft", "submitted", "screening", "assessment", "interview-1", "interview-2", "interview-3", "offer"];
@@ -323,16 +425,16 @@ function RecordSheet({
 
   return (
     <>
-      <div className="q-scrim" onClick={onClose} />
-      <aside className="q-sheet" role="dialog" aria-label={`${record.company} 的投递详情`}>
+      <div className="q-scrim" onClick={closeSheet} />
+      <aside className="q-sheet" role="dialog" aria-label={`${basics.company || "未填写公司"} 的投递详情`}>
         <header className="q-sheet-head">
           <div className="q-grow">
             <div style={{ fontSize: "var(--text-title)", fontWeight: 600, letterSpacing: "-0.01em" }}>
-              {record.company || "未填写公司"}
+              {basics.company || "未填写公司"}
             </div>
             <div className="q-cap">
-              {record.role || "未填写岗位"}
-              {record.city ? ` · ${record.city}` : ""}
+              {basics.role || "未填写岗位"}
+              {basics.city ? ` · ${basics.city}` : ""}
             </div>
           </div>
           {record.url && (
@@ -340,7 +442,7 @@ function RecordSheet({
               <External size={16} />
             </a>
           )}
-          <button type="button" className="q-icon-btn" onClick={onClose} aria-label="关闭">
+          <button type="button" className="q-icon-btn" onClick={closeSheet} aria-label="关闭">
             <X size={16} />
           </button>
         </header>
@@ -352,32 +454,36 @@ function RecordSheet({
               <span className="q-label">公司</span>
               <input
                 className="q-input"
-                value={record.company}
-                onChange={(event) => void update({ ...record, company: event.target.value, updatedAt: Date.now() })}
+                value={basics.company}
+                onChange={(event) => editBasics({ company: event.target.value })}
+                onBlur={commitBasics}
               />
             </label>
             <label className="q-field-group">
               <span className="q-label">岗位</span>
               <input
                 className="q-input"
-                value={record.role}
-                onChange={(event) => void update({ ...record, role: event.target.value, updatedAt: Date.now() })}
+                value={basics.role}
+                onChange={(event) => editBasics({ role: event.target.value })}
+                onBlur={commitBasics}
               />
             </label>
             <label className="q-field-group">
               <span className="q-label">城市</span>
               <input
                 className="q-input"
-                value={record.city ?? ""}
-                onChange={(event) => void update({ ...record, city: event.target.value, updatedAt: Date.now() })}
+                value={basics.city}
+                onChange={(event) => editBasics({ city: event.target.value })}
+                onBlur={commitBasics}
               />
             </label>
             <label className="q-field-group">
               <span className="q-label">薪资</span>
               <input
                 className="q-input"
-                value={record.salary ?? ""}
-                onChange={(event) => void update({ ...record, salary: event.target.value, updatedAt: Date.now() })}
+                value={basics.salary}
+                onChange={(event) => editBasics({ salary: event.target.value })}
+                onBlur={commitBasics}
               />
             </label>
           </div>
@@ -403,7 +509,7 @@ function RecordSheet({
                   type="button"
                   className={`q-btn q-btn-sm ${record.stage === stage ? "q-btn-secondary" : "q-btn-ghost"}`}
                   aria-pressed={record.stage === stage}
-                  onClick={() => void update(advanceStage(record, stage))}
+                  onClick={() => applyRecord(advanceStage(record, stage))}
                 >
                   {record.stage === stage && <Check size={13} />}
                   {STAGE_LABELS[stage]}
@@ -431,8 +537,9 @@ function RecordSheet({
                     type="button"
                     className="q-btn q-btn-ghost q-btn-sm"
                     onClick={() => {
-                      const { nextAction: _drop, ...rest } = record;
-                      void update({ ...rest, updatedAt: Date.now() });
+                      const cleared = { ...record };
+                      delete cleared.nextAction;
+                      applyRecord(cleared);
                     }}
                   >
                     清除
@@ -452,7 +559,7 @@ function RecordSheet({
                   className="q-btn q-btn-outline"
                   disabled={!action.trim()}
                   onClick={() => {
-                    void update(setNextAction(record, action.trim()));
+                    applyRecord(setNextAction(record, action.trim()));
                     setAction("");
                   }}
                 >
@@ -505,7 +612,7 @@ function RecordSheet({
                 onChange={(event) => setNote(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && note.trim()) {
-                    void update(addNote(record, note.trim()));
+                    applyRecord(addNote(record, note.trim()));
                     setNote("");
                   }
                 }}
@@ -515,7 +622,7 @@ function RecordSheet({
                 className="q-btn q-btn-outline"
                 disabled={!note.trim()}
                 onClick={() => {
-                  void update(addNote(record, note.trim()));
+                  applyRecord(addNote(record, note.trim()));
                   setNote("");
                 }}
               >
@@ -530,6 +637,9 @@ function RecordSheet({
             type="button"
             className="q-btn q-btn-danger"
             onClick={() => {
+              // A pending debounce would otherwise save the record back after
+              // it was deleted.
+              cancelPending();
               void getStore()
                 .deleteRecord(record.id)
                 .then(() => reload())
@@ -543,7 +653,7 @@ function RecordSheet({
             删除记录
           </button>
           <div className="q-grow" />
-          <button type="button" className="q-btn q-btn-primary" onClick={onClose}>
+          <button type="button" className="q-btn q-btn-primary" onClick={closeSheet}>
             完成
           </button>
         </footer>

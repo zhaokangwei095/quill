@@ -186,6 +186,13 @@ export const Search = (props: IconProps): JSX.Element => (
   </Svg>
 );
 
+export const Locate = (props: IconProps): JSX.Element => (
+  <Svg {...props}>
+    <circle cx="8" cy="8" r="3.2" />
+    <path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7" />
+  </Svg>
+);
+
 export const Settings = (props: IconProps): JSX.Element => (
   <Svg {...props}>
     <circle cx="8" cy="8" r="2.1" />

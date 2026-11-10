@@ -39,7 +39,12 @@ async function startFixtureServer(): Promise<{ server: Server; origin: string }>
       response.writeHead(204).end();
       return;
     }
-    const file = path === "/" || path === "/apply" ? "apply-form.html" : path.replace(/^\//, "");
+    const file =
+      path === "/" || path === "/apply"
+        ? "apply-form.html"
+        : path === "/repeatable"
+          ? "repeatable-form.html"
+          : path.replace(/^\//, "");
     try {
       const body = await readFile(join(root, "test", "fixtures", file));
       response.writeHead(200, {
@@ -118,12 +123,13 @@ const RESUME = `
 求职意向
 意向岗位：后端开发工程师    意向城市：深圳、广州
 期望薪资：28-38万/年        到岗时间：2026年7月
+求职类型：社招
 
 教育经历
 华中科技大学 计算机科学与技术 本科 2017.09 - 2021.06
 GPA 3.7/4.0，专业排名 6/140
 
-实习经历
+工作经历
 腾讯科技（深圳）有限公司 | 后端开发工程师 | 深圳 | 2021.07 - 2024.03
 • 负责支付对账系统的重构，日均处理 5000 万笔交易
 • 主导将核心服务拆分为微服务，接口平均延迟从 200ms 降到 60ms
@@ -211,7 +217,9 @@ async function waitForTarget<T>(
 let fixtureServer: Server | undefined;
 
 const failures = [];
+let checks = 0;
 const check = (condition, message, detail) => {
+  checks += 1;
   if (condition) {
     console.log(`  ✓ ${message}`);
   } else {
@@ -257,6 +265,21 @@ try {
    * import would do.
    */
   const { profile } = parseResume(RESUME, { profileId: "profile-1" });
+  check(
+    profile.experience[0]?.employmentType === "工作",
+    "resume parsing keeps the work heading as the experience kind",
+    String(profile.experience[0]?.employmentType),
+  );
+  check(
+    profile.preference.targetTrack === "experienced",
+    "resume parsing reads the declared target track",
+    String(profile.preference.targetTrack),
+  );
+  /*
+   * A document type without a number: the composite-widget fixture uses it to
+   * prove the type never leaks into the adjacent 证件号码 input.
+   */
+  profile.identity.idType = "居民身份证";
   const seeder = await openExtensionPage("pages/welcome.html");
   await seeder.waitForFunction(() => Boolean(globalThis.chrome?.storage), { timeout: 15_000 });
   await seeder.evaluate(async (seedProfile) => {
@@ -312,6 +335,12 @@ try {
     { timeout: 20_000 },
   );
   check(true, "panel produced a plan on its own");
+  const recruitmentNote = await shadow(`return root.querySelector(".q-hero")?.textContent ?? "";`);
+  check(
+    recruitmentNote.includes("识别为社招"),
+    "the form is identified as experienced recruitment",
+    recruitmentNote.slice(0, 240),
+  );
 
   const panelSummary = await shadow(`return root.querySelector(".q-hero-label")?.textContent ?? "";`);
   console.log(`  · panel summary: ${panelSummary}`);
@@ -486,6 +515,33 @@ try {
   check(/已填写 \d+ 项/.test(String(reportLine)), "panel reports how many fields it filled", String(reportLine));
 
   /*
+   * The ledger page tells people the panel asks whether to record the
+   * application after a fill. That promise is only true if the button exists and
+   * reaches the service worker, so both halves are checked here.
+   */
+  const recordLabel = await shadow(`
+    return [...root.querySelectorAll(".q-mini")]
+      .find((node) => node.textContent.includes("记入投递台账"))?.textContent?.trim() ?? "";
+  `);
+  check(String(recordLabel).includes("记入投递台账"), "panel offers to record the submission", String(recordLabel));
+
+  await shadow(`
+    const button = [...root.querySelectorAll(".q-mini")]
+      .find((node) => node.textContent.includes("记入投递台账"));
+    if (button) button.click();
+    return true;
+  `);
+  await page.waitForFunction(
+    () => (document.querySelector("quill-panel")?.shadowRoot?.textContent ?? "").includes("已记入投递台账"),
+    { timeout: 15_000 },
+  );
+  const recordedLabel = await shadow(`
+    return [...root.querySelectorAll(".q-mini")]
+      .find((node) => node.textContent.includes("已记入投递台账"))?.textContent?.trim() ?? "";
+  `);
+  check(String(recordedLabel).includes("已记入投递台账"), "panel confirms the ledger record", String(recordedLabel));
+
+  /*
    * When something fails, the reason matters more than the count. Clicking the
    * disclosure and reading it needs a tick, because React re-renders
    * asynchronously after the state change.
@@ -601,6 +657,287 @@ try {
   check(dom.agree !== "on", "consent checkbox left unticked");
   check(dom.relatives !== null, "relative radio group was answered", String(dom.relatives));
 
+  /* ------------------------------------ opening empty repeatable sections */
+
+  /*
+   * Real ATS pages often render education/experience as completely empty
+   * sections with one “添加” control. The scanner cannot see fields that do not
+   * exist yet, so “填写” must open the sections first and re-plan. This fixture
+   * starts with zero rows in both, while the seeded profile has one entry for
+   * each — exactly the shape that used to produce a four-field plan on a page
+   * that needed a dozen.
+   */
+  const repeatPage = await browser.newPage();
+  await repeatPage.setViewport({ width: 1440, height: 900 });
+  const repeatErrors: string[] = [];
+  repeatPage.on("pageerror", (error) => repeatErrors.push(String(error)));
+  repeatPage.on("console", (message) => {
+    if (message.type() === "error") repeatErrors.push(message.text());
+  });
+
+  await repeatPage.goto(`${origin}/repeatable`, { waitUntil: "domcontentloaded" });
+  await repeatPage.waitForFunction(() => Boolean(document.querySelector("quill-panel")), { timeout: 15_000 });
+
+  const repeatShadow = async (fnBody: string) =>
+    repeatPage.evaluate(`(() => {
+      const host = document.querySelector("quill-panel");
+      const root = host?.shadowRoot;
+      if (!root) return null;
+      ${fnBody}
+    })()`);
+
+  await repeatPage.waitForFunction(
+    () => {
+      const text = document.querySelector("quill-panel")?.shadowRoot?.textContent ?? "";
+      return text.includes("本页") && text.includes("个字段");
+    },
+    { timeout: 20_000 },
+  );
+
+  const sectionNotice = await repeatShadow(`
+    return [...root.querySelectorAll(".q-notice")]
+      .map((node) => node.textContent.replace(/\\s+/g, " ").trim())
+      .find((text) => text.includes("自动添加")) ?? "";
+  `);
+  console.log(`  · section notice: ${sectionNotice}`);
+  check(
+    String(sectionNotice).includes("教育经历") && String(sectionNotice).includes("自动添加"),
+    "panel announces the empty sections it can open",
+    String(sectionNotice),
+  );
+
+  const mismatchNotice = await repeatShadow(`
+    return [...root.querySelectorAll(".q-notice")]
+      .map((node) => node.textContent.replace(/\\s+/g, " ").trim())
+      .find((text) => text.includes("不会用其他类别的经历代替")) ?? "";
+  `);
+  console.log(`  · experience-type notice: ${mismatchNotice}`);
+  check(
+    String(mismatchNotice).includes("实习经历") && String(mismatchNotice).includes("不会用其他类别的经历代替"),
+    "panel explains when saved experience does not match the internship section",
+    String(mismatchNotice),
+  );
+
+  /*
+   * The fixture also has an empty “项目经历” block that the resumed profile has
+   * no entries for. Leaving that unmentioned was the silent gap this check
+   * exists to prevent: the person should be told the section is theirs to fill,
+   * not left wondering why the panel ignored it.
+   */
+  const missingNotice = await repeatShadow(`
+    return [...root.querySelectorAll(".q-notice")]
+      .map((node) => node.textContent.replace(/\\s+/g, " ").trim())
+      .find((text) => text.includes("还没有对应记录")) ?? "";
+  `);
+  console.log(`  · missing-profile notice: ${missingNotice}`);
+  check(
+    String(missingNotice).includes("项目经历"),
+    "panel names an empty section the profile cannot fill",
+    String(missingNotice),
+  );
+  check(
+    String(missingNotice).includes("手动填写"),
+    "the notice tells the person what to do instead",
+    String(missingNotice),
+  );
+
+  const rowsBefore = await repeatPage.evaluate(() => ({
+    education: document.querySelectorAll('[data-repeat="education"] [data-row]').length,
+    experience: document.querySelectorAll('[data-repeat="experience"] [data-row]').length,
+    projects: document.querySelectorAll('[data-repeat="projects"] [data-row]').length,
+  }));
+  check(
+    rowsBefore.education === 0 && rowsBefore.experience === 0 && rowsBefore.projects === 0,
+    "the fixture really starts with no rows",
+    JSON.stringify(rowsBefore),
+  );
+
+  await repeatShadow(`root.querySelector(".q-cta:not(.q-cta-ghost)").click(); return true;`);
+  await repeatPage.waitForFunction(
+    () => (document.querySelector("quill-panel")?.shadowRoot?.textContent ?? "").includes("已填写"),
+    { timeout: 25_000 },
+  );
+
+  const opened = await repeatPage.evaluate(() => {
+    const value = (selector) => document.querySelector(selector)?.value ?? null;
+    return {
+      educationRows: document.querySelectorAll('[data-repeat="education"] [data-row]').length,
+      experienceRows: document.querySelectorAll('[data-repeat="experience"] [data-row]').length,
+      projectsRows: document.querySelectorAll('[data-repeat="projects"] [data-row]').length,
+      school: value('input[name="school[0]"]'),
+      major: value('input[name="major[0]"]'),
+      company: value('input[name="company[0]"]'),
+      title: value('input[name="jobTitle[0]"]'),
+    };
+  });
+  console.log("  · opened sections:", JSON.stringify(opened));
+
+  check(opened.educationRows === 1, "education row was opened automatically", JSON.stringify(opened));
+  check(opened.experienceRows === 0, "a work record was not opened into an internship section", JSON.stringify(opened));
+  check(
+    opened.projectsRows === 0,
+    "a section with no profile entries was left untouched",
+    JSON.stringify(opened),
+  );
+  check(opened.school === "华中科技大学", "the opened education row was filled", String(opened.school));
+  check(opened.major === "计算机科学与技术", "the opened education major was filled", String(opened.major));
+  check(opened.company === null, "the mismatched work record was not copied into an internship row", String(opened.company));
+  check(opened.title === null, "the mismatched work title was not copied into an internship row", String(opened.title));
+
+  const openedReport = await repeatShadow(`
+    return [...root.querySelectorAll(".q-notice")]
+      .map((node) => node.textContent.replace(/\\s+/g, " ").trim())
+      .join(" | ");
+  `);
+  check(String(openedReport).includes("已自动添加"), "the fill report acknowledges the opened rows", String(openedReport));
+
+  /*
+   * Opening and re-planning must not erase the explanation: the project section
+   * is still empty and still has no profile source after the fill.
+   */
+  const missingAfter = await repeatShadow(`
+    return [...root.querySelectorAll(".q-notice")]
+      .map((node) => node.textContent.replace(/\\s+/g, " ").trim())
+      .find((text) => text.includes("还没有对应记录")) ?? "";
+  `);
+  check(
+    String(missingAfter).includes("项目经历"),
+    "the unfillable-section notice survives the re-plan",
+    String(missingAfter),
+  );
+  check(repeatErrors.length === 0, "no page errors while opening sections", repeatErrors.join("; "));
+  await repeatPage.close();
+
+  /* ------------------------------- Tencent-style composite fields and bands */
+
+  /*
+   * Two shapes copied from the live Tencent form:
+   *  - one `.subtitle` “个人证件” above a type trigger *and* a number input;
+   *  - 成绩排名 as 前5% / 前10% / 前20% / 其他 while the resume stores “6/140”.
+   * The first must not let the type value leak into the number box; the second
+   * must convert the rank into the band the page actually offers.
+   */
+  const widgetPage = await browser.newPage();
+  await widgetPage.setViewport({ width: 1280, height: 800 });
+  const widgetErrors: string[] = [];
+  widgetPage.on("pageerror", (error) => widgetErrors.push(String(error)));
+  widgetPage.on("console", (message) => {
+    if (message.type() === "error") widgetErrors.push(message.text());
+  });
+
+  await widgetPage.goto(`${origin}/tencent-widgets.html`, { waitUntil: "domcontentloaded" });
+  await widgetPage.waitForFunction(() => Boolean(document.querySelector("quill-panel")), { timeout: 15_000 });
+  const widgetShadow = async (fnBody: string) =>
+    widgetPage.evaluate(`(() => {
+      const host = document.querySelector("quill-panel");
+      const root = host?.shadowRoot;
+      if (!root) return null;
+      ${fnBody}
+    })()`);
+
+  await widgetPage.waitForFunction(
+    () => {
+      const text = document.querySelector("quill-panel")?.shadowRoot?.textContent ?? "";
+      return text.includes("本页") && text.includes("个字段");
+    },
+    { timeout: 20_000 },
+  );
+
+  const widgetRows = await widgetShadow(`
+    return [...root.querySelectorAll(".q-field")].map((field) => ({
+      label: (field.querySelector(".q-field-label-text")?.textContent ?? "").trim(),
+      status: field.getAttribute("data-status") ?? "",
+      value: (field.querySelector(".q-field-value")?.textContent ?? "").trim(),
+    }));
+  `);
+  console.log(`  · composite-field rows: ${JSON.stringify(widgetRows)}`);
+
+  const numberRow = (widgetRows ?? []).find((row) => row.label.includes("证件号码"));
+  check(Boolean(numberRow), "the ID number input gets its own label", JSON.stringify(widgetRows));
+  check(
+    !(numberRow?.value ?? "").includes("居民身份证"),
+    "the ID type is never proposed for the number input",
+    JSON.stringify(numberRow),
+  );
+  check(
+    (widgetRows ?? []).some((row) => row.label.includes("个人证件")),
+    "the document-type trigger keeps the shared subtitle",
+    JSON.stringify(widgetRows),
+  );
+
+  const rankRow = (widgetRows ?? []).find((row) => row.label.includes("成绩排名"));
+  check(rankRow?.value === "前5%", "a class rank maps to the page's percentile band", JSON.stringify(rankRow));
+
+  const languageRow = (widgetRows ?? []).find((row) => row.label.includes("开发语言"));
+  const languageValues = (languageRow?.value ?? "").split("、").filter(Boolean);
+  check(
+    languageRow?.status === "ready" &&
+      languageValues.length === 3 &&
+      ["Go", "Java", "Python"].every((item) => languageValues.includes(item)),
+    "a multi-select receives every language its option list can express",
+    JSON.stringify(languageRow),
+  );
+  check(
+    !languageValues.includes("SQL"),
+    "a value the multi-select does not offer is left out",
+    JSON.stringify(languageValues),
+  );
+
+  /*
+   * The identity box stacks a group heading (“证件信息”) above the field's own
+   * subtitle. The group heading is shorter, so a shortest-text heuristic picked
+   * it and the country select asked for “证件信息”. The nearest preceding label
+   * must win.
+   */
+  const nationalityRow = (widgetRows ?? []).find((row) => row.label.includes("国家/地区"));
+  check(Boolean(nationalityRow), "a group heading above a field is not used as its label", JSON.stringify(widgetRows));
+  check(
+    !(widgetRows ?? []).some((row) => row.label === "证件信息"),
+    "the group heading is not a field of its own",
+    JSON.stringify(widgetRows),
+  );
+
+  /*
+   * Element UI hides the real checkbox as a 0×0 transparent input inside a
+   * visible label. It must be scanned once (it is a real question) while its
+   * caption must not leak onto the two date inputs beside it.
+   */
+  const currentRows = (widgetRows ?? []).filter((row) => row.label === "至今");
+  check(currentRows.length === 1, "the wrapped Element-UI checkbox is scanned exactly once", JSON.stringify(widgetRows));
+  const periodRows = (widgetRows ?? []).filter((row) => row.label.startsWith("起止时间"));
+  check(
+    periodRows.length === 2 &&
+      periodRows.some((row) => row.label.includes("开始")) &&
+      periodRows.some((row) => row.label.includes("结束")),
+    "the two date inputs keep the row label instead of borrowing 至今",
+    JSON.stringify(periodRows),
+  );
+
+  await widgetShadow(`root.querySelector(".q-cta:not(.q-cta-ghost)")?.click(); return true;`);
+  await widgetPage.waitForFunction(() => document.querySelector("#rank")?.value === "top5", { timeout: 15_000 });
+  await widgetPage.waitForFunction(
+    () => (document.querySelector("quill-panel")?.shadowRoot?.textContent ?? "").includes("已填写"),
+    { timeout: 15_000 },
+  );
+  const widgetReport = await widgetShadow(
+    `return [...root.querySelectorAll(".q-notice")].map((node) => node.textContent).join(" | ");`,
+  );
+  console.log(`  · composite fill report: ${widgetReport}`);
+  const widgetDom = await widgetPage.evaluate(() => ({
+    rank: document.querySelector("#rank")?.value ?? null,
+    idNumber: document.querySelector("#idNumber")?.value ?? null,
+    languages: [...document.querySelectorAll("#languages .el-tag")].map((element) => element.textContent.trim()),
+  }));
+  check(widgetDom.rank === "top5", "the percentile band was written into the select", String(widgetDom.rank));
+  check(widgetDom.idNumber === "", "the ID number input was left empty", String(widgetDom.idNumber));
+  check(
+    widgetDom.languages.length === 3 && ["Go", "Java", "Python"].every((item) => widgetDom.languages.includes(item)),
+    "the multi-select choices were clicked, not typed into the box",
+    JSON.stringify(widgetDom.languages),
+  );
+  check(widgetErrors.length === 0, "no page errors on the composite-field page", widgetErrors.join("; "));
+  await widgetPage.close();
+
   /* ---------------------------------------------- learning from the person */
 
   /*
@@ -683,6 +1020,112 @@ try {
   );
   await staffProfile.close();
 
+  /* ------------------------------------------ manual answer directly on page */
+
+  /*
+   * The missing-field action must move focus into the synthetic application
+   * form. The user types there; the normal change/blur watcher may then learn it.
+   * This also times the click-to-focus path without touching a live application.
+   */
+  const hukouBefore = await page.evaluate(() => document.querySelector("#hukou")?.value ?? null);
+  check(hukouBefore === null || hukouBefore === "", "the household field starts empty", String(hukouBefore));
+
+  const focusMeasurement = await shadow(`
+    for (const field of root.querySelectorAll(".q-field")) {
+      if ((field.querySelector(".q-field-label-text")?.textContent ?? "").includes("户口所在地")) {
+        const action = [...field.querySelectorAll(".q-mini")].find((node) =>
+          (node.textContent ?? "").includes("我来填写"),
+        );
+        if (!action) return { error: "no-manual-action" };
+        const start = performance.now();
+        action.click();
+        return {
+          durationMs: Math.round((performance.now() - start) * 10) / 10,
+          activeId: document.activeElement?.id ?? "",
+          message: field.querySelector('[role="status"]')?.textContent?.trim() ?? "",
+          editorOpened: Boolean(root.querySelector(".q-edit input, .q-edit textarea")),
+        };
+      }
+    }
+    return { error: "row-not-found" };
+  `);
+  console.log(`  · synthetic click-to-focus: ${JSON.stringify(focusMeasurement)}`);
+  check(
+    focusMeasurement?.activeId === "hukou",
+    "我来填写 moves focus to the real page field",
+    JSON.stringify(focusMeasurement),
+  );
+  check(
+    focusMeasurement?.editorOpened === false,
+    "manual entry does not open an extension-side editor",
+    JSON.stringify(focusMeasurement),
+  );
+  check(
+    (focusMeasurement?.durationMs ?? Number.POSITIVE_INFINITY) < 100,
+    "synthetic manual focus completes under 100ms",
+    JSON.stringify(focusMeasurement),
+  );
+  await page.waitForFunction(
+    () => {
+      const panelRoot = document.querySelector("quill-panel")?.shadowRoot;
+      return [...(panelRoot?.querySelectorAll('[role="status"]') ?? [])].some((node) =>
+        (node.textContent ?? "").includes("直接在页面中填写"),
+      );
+    },
+    { timeout: 5_000 },
+  );
+  const focusMessageAfter = await shadow(`
+    const field = [...root.querySelectorAll(".q-field")].find((item) =>
+      (item.querySelector(".q-field-label-text")?.textContent ?? "").includes("户口所在地"),
+    );
+    return field?.querySelector('[role="status"]')?.textContent?.trim() ?? "";
+  `);
+  check(
+    focusMessageAfter.includes("直接在页面中填写"),
+    "the panel tells the user to type into the page field",
+    focusMessageAfter,
+  );
+
+  const manualAnswerEnteredAt = Date.now();
+  await page.keyboard.type("湖北武汉");
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(
+    () => {
+      const panelRoot = document.querySelector("quill-panel")?.shadowRoot;
+      for (const field of panelRoot?.querySelectorAll(".q-field") ?? []) {
+        const label = field.querySelector(".q-field-label-text")?.textContent ?? "";
+        const why = field.querySelector(".q-field-why-text")?.textContent ?? "";
+        if (
+          label.includes("户口所在地") &&
+          field.getAttribute("data-status") === "ready" &&
+          why.includes("记忆")
+        ) {
+          return true;
+        }
+      }
+      return false;
+    },
+    { timeout: 15_000 },
+  );
+
+  const hukouRowAfter = await shadow(`
+    for (const field of root.querySelectorAll(".q-field")) {
+      if ((field.querySelector(".q-field-label-text")?.textContent ?? "").includes("户口所在地")) {
+        return {
+          status: field.getAttribute("data-status") ?? "",
+          value: (field.querySelector(".q-field-value")?.textContent ?? "").trim(),
+          why: (field.querySelector(".q-field-why-text")?.textContent ?? "").trim(),
+        };
+      }
+    }
+    return null;
+  `);
+  check(
+    hukouRowAfter?.status === "ready" && (hukouRowAfter?.value ?? "").includes("湖北武汉"),
+    "typing on the page is learned and appears in the refreshed panel",
+    JSON.stringify(hukouRowAfter),
+  );
+
   /* ------------------------------------------------------------- popup */
 
   const popup = await openExtensionPage("popup.html");
@@ -714,6 +1157,177 @@ try {
     await bench.evaluate(() => Boolean(document.querySelector(".q-rail"))),
     "workbench nav rail rendered",
   );
+
+  /*
+   * The stored profile is a snapshot taken when the resume was imported, so a
+   * parser fix cannot reach it on its own. The explicit rebuild must round-trip
+   * through the worker and keep the raw text a later rebuild needs.
+   */
+  const reparse = (await bench.evaluate(async () => {
+    const response = (await chrome.runtime.sendMessage({ type: "reparse-resume" })) as {
+      ok?: boolean;
+      type?: string;
+      state?: { profile?: { rawText?: string; education?: unknown[] } };
+      error?: string;
+    };
+    return {
+      ok: response?.ok,
+      type: response?.type,
+      hasProfile: Boolean(response?.state?.profile),
+      hasRawText: Boolean(response?.state?.profile?.rawText),
+      educationRows: response?.state?.profile?.education?.length ?? -1,
+      error: response?.error,
+    };
+  })) as {
+    ok?: boolean;
+    type?: string;
+    hasProfile?: boolean;
+    hasRawText?: boolean;
+    educationRows?: number;
+    error?: string;
+  };
+  check(
+    reparse.ok === true && reparse.type === "reparse-resume" && reparse.hasProfile === true,
+    "the workbench can rebuild the stored profile from saved resume text",
+    JSON.stringify(reparse),
+  );
+  check(
+    reparse.hasRawText === true && (reparse.educationRows ?? 0) > 0,
+    "the rebuilt profile keeps its raw text and education rows",
+    JSON.stringify(reparse),
+  );
+
+  await bench.evaluate(() => {
+    window.location.hash = "#/resume";
+  });
+  await bench.waitForFunction(() => document.body.innerText.includes("基本信息"), { timeout: 8000 });
+  check(
+    await bench.evaluate(() =>
+      [...document.querySelectorAll("button")].some((button) =>
+        (button.textContent ?? "").includes("重新解析"),
+      ),
+    ),
+    "the resume view offers an explicit reparse action",
+  );
+  check(
+    (await bench.evaluate(() => document.body.innerText)).includes("投递类型"),
+    "the resume view exposes the track the resume is meant for",
+  );
+
+  const ledgerRecords = await bench.evaluate(async () => {
+    const value = await chrome.storage.local.get("quill.records");
+    const records = value["quill.records"];
+    return Array.isArray(records) ? records.length : -1;
+  });
+  check(ledgerRecords === 1, "the ledger contains the recorded submission", `count=${ledgerRecords}`);
+
+  /* --------------------------------------------------------- diagnostics */
+
+  /*
+   * The report path has two halves: the panel button a person clicks when they
+   * are staring at a broken page, and the bundle the workbench exports later.
+   * The clipboard half cannot be asserted reliably in headless Chrome, so this
+   * checks the control exists and exercises the real background export.
+   */
+  const reportControl = await shadow(`
+    const button = root.querySelector('[aria-label="报告问题"]');
+    return button
+      ? { label: button.getAttribute("aria-label"), title: button.getAttribute("title") }
+      : null;
+  `);
+  check(Boolean(reportControl), "the panel exposes a report-a-problem control", JSON.stringify(reportControl));
+
+  interface DiagnosticBundleShape {
+    schemaVersion?: number;
+    description?: string;
+    environment?: { extensionVersion?: string };
+    snapshot?: {
+      page?: { siteKey?: string; url?: string };
+      scan?: { fieldCount?: number };
+      fill?: { filled?: number };
+    };
+    events?: Array<{ at?: number; scope?: string; event?: string; data?: Record<string, unknown> }>;
+  }
+
+  /*
+   * The description deliberately contains contact details. A diagnostic bundle
+   * is only trustworthy if it carries the person's account of the problem but
+   * not the person, so pattern redaction is asserted on the real export.
+   */
+  const diagExport = (await bench.evaluate(async () => {
+    return chrome.runtime.sendMessage({
+      type: "diagnostics-export",
+      description: "填写后教育经历没有出现，联系我 13600001111 或 zhouzimo@example.com",
+    });
+  })) as { ok?: boolean; bundle?: DiagnosticBundleShape; error?: string };
+
+  check(
+    diagExport?.ok === true,
+    "diagnostics export succeeds",
+    diagExport?.error ?? JSON.stringify(diagExport).slice(0, 160),
+  );
+
+  const bundle = diagExport?.bundle;
+  check(bundle?.schemaVersion === 1, "the diagnostic bundle carries its schema version", String(bundle?.schemaVersion));
+  check(
+    (bundle?.events?.length ?? 0) > 0,
+    "the diagnostic bundle contains recorded events",
+    `count=${bundle?.events?.length ?? 0}`,
+  );
+  check(
+    bundle?.events?.some((event) => event.scope === "content") ?? false,
+    "events from the page content script are included",
+  );
+  check(
+    bundle?.events?.some((event) => event.event === "fill.completed") ?? false,
+    "the fill operation is present in the log",
+    JSON.stringify(bundle?.events?.map((event) => event.event).slice(0, 12)),
+  );
+  check(
+    bundle?.events?.some((event) => event.event === "scan.completed" && (event.at ?? 0) >= manualAnswerEnteredAt) ?? false,
+    "committing a page-entered answer triggers a fresh scan",
+    JSON.stringify(bundle?.events?.filter((event) => event.event === "scan.completed").slice(0, 4)),
+  );
+  const manualFocusEvent = bundle?.events?.find((event) => event.event === "manual-focus.completed");
+  console.log(`  · manual-focus stage timings: ${JSON.stringify(manualFocusEvent?.data ?? null)}`);
+  check(
+    typeof manualFocusEvent?.data?.totalMs === "number" && manualFocusEvent.data.totalMs < 100,
+    "manual focus is measured and completes in under 100ms on the synthetic page",
+    JSON.stringify(manualFocusEvent?.data),
+  );
+  check(
+    (bundle?.snapshot?.scan?.fieldCount ?? 0) > 0,
+    "the snapshot keeps the shape of the last scan",
+    JSON.stringify(bundle?.snapshot?.scan?.fieldCount),
+  );
+  check(
+    Boolean(bundle?.environment?.extensionVersion),
+    "the bundle records the extension version",
+    bundle?.environment?.extensionVersion,
+  );
+  check(
+    Boolean(bundle?.description?.includes("[phone]") && bundle?.description?.includes("[email]")),
+    "contact details in the description are redacted",
+    bundle?.description,
+  );
+  check(
+    !(bundle?.snapshot?.page?.url ?? "").includes("?"),
+    "the recorded page URL has no query string",
+    bundle?.snapshot?.page?.url,
+  );
+
+  const bundleText = JSON.stringify(bundle ?? {});
+  for (const secret of ["13600001111", "zhouzimo@example.com", "周子墨", "华中科技大学", "zimo_2026"]) {
+    check(!bundleText.includes(secret), `the diagnostic bundle does not contain "${secret}"`);
+  }
+
+  const diagCleared = (await bench.evaluate(async () => {
+    const clear = await chrome.runtime.sendMessage({ type: "diagnostics-clear" });
+    const after = await chrome.runtime.sendMessage({ type: "diagnostics-export" });
+    return { ok: clear?.ok === true, events: after?.bundle?.events?.length ?? -1 };
+  })) as { ok: boolean; events: number };
+  check(diagCleared.ok, "diagnostics can be cleared");
+  check(diagCleared.events === 0, "clearing removes the recorded events", `events=${diagCleared.events}`);
 
   /* -------------------------------------------------------- real screenshots */
 
@@ -812,6 +1426,46 @@ try {
     console.log(`  · wrote workbench screenshots`);
   }
 
+  /* -------------------------------------------------- tailor job-name input */
+
+  await bench.evaluate(() => { window.location.hash = "#/tailor"; });
+  await bench.waitForFunction(() => document.body.innerText.includes("岗位描述"), { timeout: 8000 });
+  check(
+    (await bench.evaluate(() => document.body.innerText)).includes("岗位名称"),
+    "the tailor view exposes a dedicated job-title input",
+  );
+  await bench.evaluate(() => {
+    const textarea = document.querySelector<HTMLTextAreaElement>(".q-textarea");
+    if (!textarea) return;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    setter?.call(textarea, "岗位名称：高级后端开发工程师\n任职要求\n1. 熟悉 Go 与 Kubernetes");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await bench.waitForFunction(
+    () =>
+      Array.from(document.querySelectorAll<HTMLInputElement>(".q-job-name-input")).some(
+        (input) => input.value === "高级后端开发工程师",
+      ),
+    { timeout: 8000 },
+  );
+  check(true, "pasting a labelled job title fills the job-name input");
+  await bench.evaluate(() => {
+    const title = document.querySelector<HTMLInputElement>(".q-job-name-input");
+    const textarea = document.querySelector<HTMLTextAreaElement>(".q-textarea");
+    if (!title || !textarea) return;
+    const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    inputSetter?.call(title, "用户手动填写的岗位");
+    title.dispatchEvent(new Event("input", { bubbles: true }));
+    textareaSetter?.call(textarea, "岗位名称：产品经理\n任职要求\n1. 熟悉用户研究");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await bench.waitForFunction(
+    () => document.querySelector<HTMLInputElement>(".q-job-name-input")?.value === "用户手动填写的岗位",
+    { timeout: 8000 },
+  );
+  check(true, "editing the job name manually protects it from later description changes");
+
   /* ------------------------------------------------------------- errors */
 
   const realErrors = pageErrors.filter(
@@ -892,10 +1546,10 @@ try {
 
 console.log("");
 if (failures.length === 0) {
-  console.log("e2e: all checks passed");
+  console.log(`e2e: all ${checks} checks passed`);
   process.exit(0);
 } else {
-  console.log(`e2e: ${failures.length} check(s) failed`);
+  console.log(`e2e: ${failures.length} of ${checks} check(s) failed`);
   for (const failure of failures) console.log(`  - ${failure}`);
   process.exit(1);
 }

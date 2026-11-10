@@ -18,5 +18,5 @@
     },
     "baseUrl": "."
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../packages/core/src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../packages/core/src/**/*.ts", "../scripts/probe-entry.ts"]
 }

@@ -15,6 +15,7 @@ import { TailorView } from "./views/Tailor.js";
 import { LedgerView } from "./views/Ledger.js";
 import { MemoryView } from "./views/Memory.js";
 import { SettingsView } from "./views/Settings.js";
+import { SetupView } from "./views/Setup.js";
 import {
   Book,
   Brain,
@@ -36,11 +37,12 @@ const ROUTES = [
   { id: "memory", label: "记忆", icon: Brain },
 ] as const;
 
-type RouteId = (typeof ROUTES)[number]["id"] | "settings";
+type RouteId = (typeof ROUTES)[number]["id"] | "settings" | "setup";
 
 function currentRoute(): RouteId {
   const hash = window.location.hash.replace(/^#\/?/, "").split("/")[0] ?? "";
   if (hash === "settings") return "settings";
+  if (hash === "setup") return "setup";
   const match = ROUTES.find((route) => route.id === hash);
   return match?.id ?? "home";
 }
@@ -67,6 +69,16 @@ export function App(): JSX.Element {
   const activeApplications = state.records.filter(
     (record) => record.stage !== "rejected" && record.stage !== "withdrawn",
   ).length;
+
+  /*
+   * A fresh install opens the workbench with no profile and no setup choice.
+   * Show the guide in place of the dashboard once, but do not trap the person
+   * there: any explicit hash route still wins. Existing profiles are left
+   * alone; the same guide is one click away under settings.
+   */
+  const setupPending =
+    !loading && !state.profile && state.settings.setupCompleted !== true;
+  const effectiveRoute: RouteId = setupPending && route === "home" ? "setup" : route;
 
   return (
     <div className="q-app">
@@ -113,7 +125,7 @@ export function App(): JSX.Element {
 
       <main className="q-main">
         <TopBar
-          route={route}
+          route={effectiveRoute}
           company={state.profile?.preference.position}
           insights={insights.length}
         />
@@ -143,12 +155,15 @@ export function App(): JSX.Element {
             </div>
           ) : (
             <>
-              {route === "home" && <Home onNavigate={(next) => navigate(next as RouteId)} />}
-              {route === "resume" && <ResumeView onNavigate={(next) => navigate(next as RouteId)} onToast={show} />}
-              {route === "tailor" && <TailorView onNavigate={(next) => navigate(next as RouteId)} onToast={show} />}
-              {route === "ledger" && <LedgerView onToast={show} />}
-              {route === "memory" && <MemoryView onToast={show} />}
-              {route === "settings" && <SettingsView onToast={show} />}
+              {effectiveRoute === "setup" && (
+                <SetupView onDone={(next) => navigate(next as RouteId)} onToast={show} />
+              )}
+              {effectiveRoute === "home" && <Home onNavigate={(next) => navigate(next as RouteId)} />}
+              {effectiveRoute === "resume" && <ResumeView onNavigate={(next) => navigate(next as RouteId)} onToast={show} />}
+              {effectiveRoute === "tailor" && <TailorView onNavigate={(next) => navigate(next as RouteId)} onToast={show} />}
+              {effectiveRoute === "ledger" && <LedgerView onToast={show} />}
+              {effectiveRoute === "memory" && <MemoryView onToast={show} />}
+              {effectiveRoute === "settings" && <SettingsView onToast={show} />}
             </>
           )}
         </div>
@@ -173,8 +188,11 @@ function TopBar({
   insights: number;
 }): JSX.Element {
   const { state } = useWorkbench();
+  const activeDirection = state.profiles.find((dossier) => dossier.id === state.activeProfileId);
   const subtitle =
-    route === "home"
+    route === "setup"
+      ? "选择简历识别与岗位分析的方式"
+      : route === "home"
       ? "今天可以从这里开始"
       : route === "resume"
         ? state.profile?.identity.fullName
@@ -198,7 +216,9 @@ function TopBar({
     <header className="q-topbar">
       <div>
         <div className="q-topbar-title">
-          {route === "home"
+          {route === "setup"
+            ? "开始使用"
+            : route === "home"
             ? "工作台"
             : route === "resume"
               ? "简历"
@@ -213,6 +233,11 @@ function TopBar({
         <div className="q-topbar-sub">{subtitle}</div>
       </div>
       <div className="q-grow" />
+      {route === "resume" && activeDirection && (
+        <span className="q-chip q-chip-neutral" title="当前工作台正在编辑的方向；投递时扩展会按岗位自动匹配简历">
+          编辑：{activeDirection.name}
+        </span>
+      )}
       {company && (
         <span className="q-chip q-chip-accent" title="当前简历的意向岗位">
           意向：{company}

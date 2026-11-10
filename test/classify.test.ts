@@ -88,6 +88,63 @@ test("classifyField uses the section to disambiguate short labels", () => {
   assert.equal(startWork.key, "work.startDate");
 });
 
+test("classifyField recognises section-scoped 至今 checkboxes", () => {
+  assert.equal(classifyField(field("至今", { kind: "checkbox", section: "education" })).key, "education.current");
+  assert.equal(classifyField(field("至今", { kind: "checkbox", section: "experience" })).key, "work.current");
+  assert.equal(classifyField(field("至今", { kind: "checkbox", section: "project" })).key, "project.current");
+});
+
+test("an absence checkbox is never read as its section's text field", () => {
+  const cases: Array<[string, string, FieldDescriptor["section"]]> = [
+    ["无实习经历", "meta.noExperience", "experience"],
+    ["无项目经历", "meta.noProjects", "project"],
+    ["无获奖信息", "meta.noAwards", "skill"],
+  ];
+  for (const [label, expected, section] of cases) {
+    const classified = classifyFields([field(label, { kind: "checkbox", section })])[0];
+    assert.equal(classified?.key, expected, `"${label}" should be ${expected}, got ${classified?.key}`);
+    // Hands-off means the resolver must never invent a value for it.
+    assert.equal(classified?.keyConfidence, 0);
+  }
+});
+
+test("Tencent's 外语考试/等级 dropdown is the language field", () => {
+  assert.equal(
+    classifyField(field("外语考试/等级", { kind: "combobox", section: "skill" })).key,
+    "skill.language",
+  );
+});
+
+test("classifyField treats 个人证件 as the document type", () => {
+  assert.equal(classifyField(field("个人证件", { kind: "combobox" })).key, "identity.idType");
+  // The neighbouring free-text input is the number, not a second type field.
+  assert.equal(classifyField(field("证件号码", { section: "identity" })).key, "identity.idNumber");
+});
+
+test("classifyField recognises Tencent's AI application questions", () => {
+  assert.equal(
+    classifyField(field("请列出你常用的 AI 工具&模型", { kind: "textarea", section: "essay" })).key,
+    "essay.aiTools",
+  );
+  assert.equal(
+    classifyField(
+      field("请描述一个或多个你与AI协作完成的项目或任务", { kind: "textarea", section: "essay" }),
+    ).key,
+    "essay.aiProjects",
+  );
+});
+
+test("classifyFields pairs split dates that share one container label", () => {
+  const classified = classifyFields([
+    field("起止时间", { ref: "start", section: "education", placeholder: "选择日期" }),
+    field("起止时间", { ref: "end", section: "education", placeholder: "选择日期" }),
+  ]);
+  assert.equal(classified[0]?.key, "education.startDate");
+  assert.equal(classified[1]?.key, "education.endDate");
+  assert.equal(classified[0]?.label, "起止时间（开始）");
+  assert.equal(classified[1]?.label, "起止时间（结束）");
+});
+
 test("classifyField trusts the autocomplete attribute", () => {
   const result = classifyField(field("", { autocomplete: "email", labelSource: "none" }));
   assert.equal(result.key, "contact.email");
@@ -171,6 +228,17 @@ test("matchOption matches numeric salary bands", () => {
   const options = [opt("a", "8000元以下"), opt("b", "8000-12000元"), opt("c", "12000元以上")];
   assert.equal(matchOption({ text: "8000" }, options)?.value, "b");
   assert.equal(matchOption({ text: "8k" }, options)?.value, "b");
+});
+
+test("matchOption converts a class rank into a percentile band", () => {
+  const options = [opt("top5", "前5%"), opt("top10", "前10%"), opt("top20", "前20%"), opt("other", "其他")];
+  assert.equal(matchOption({ text: "6/140" }, options)?.value, "top5");
+  assert.equal(matchOption({ text: "12/100" }, options)?.value, "top20");
+  assert.equal(matchOption({ text: "30/100" }, options)?.value, "other");
+  assert.equal(matchOption({ text: "前10%" }, options)?.value, "top10");
+  // A select with no percentile vocabulary is untouched by the pre-pass.
+  const cities = [opt("bj", "北京"), opt("sh", "上海")];
+  assert.equal(matchOption({ text: "6/140" }, cities), undefined);
 });
 
 test("scoreOption prefers exact label matches over fuzzy", () => {

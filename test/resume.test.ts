@@ -88,13 +88,29 @@ test("parseResume splits education entries and finds dates", () => {
   assert.equal(master?.degree, "硕士");
 });
 
-test("parseResume keeps experience highlights verbatim", () => {
-  const { profile } = parseResume(RESUME_CN);
+test("an award line inside education is never read as the major", () => {
+  const { profile } = parseResume(`
+教育经历
+2023.09 - 2026.06 中国科学院大学 硕士
+中国科学院大学计算机设计大赛省赛二等奖
+`);
+  const education = profile.education[0];
+  assert.ok(education, "the education entry should survive");
+  assert.notEqual(education.major, "计算机设计大赛省赛二等奖");
+  assert.equal(education.major, undefined, "no major was stated, so none should be invented");
+  assert.ok(
+    education.honors?.some((line) => line.includes("计算机设计大赛")),
+    "the competition award belongs in honors",
+  );
+});
+
+test("parseResume keeps experience highlights verbatim", () => {  const { profile } = parseResume(RESUME_CN);
   assert.equal(profile.experience.length, 2);
   const first = profile.experience[0];
   assert.equal(first?.company, "阿里巴巴");
   assert.equal(first?.title, "后端开发实习生");
   assert.equal(first?.city, "杭州");
+  assert.equal(first?.employmentType, "实习");
   assert.deepEqual(first?.dates, { start: "2023-06", end: "2023-12", current: false });
   assert.equal(first?.highlights.length, 3);
   assert.ok(
@@ -171,6 +187,39 @@ Python, Spark, Flink, SQL, Kubernetes
   assert.ok(profile.skills.items.includes("Flink"));
 });
 
+test("parseResume infers an internship from the title under a mixed heading", () => {
+  const { profile } = parseResume(`
+林晓
+linxiao@example.com
+
+求职意向
+求职类型：实习
+
+工作与实习经历
+示例科技 | 后端开发实习生 | 2024.06 - 2024.09
+• 负责订单接口开发与压测
+`);
+  assert.equal(profile.preference.jobType, "实习");
+  assert.equal(profile.preference.targetTrack, "internship");
+  assert.equal(profile.experience[0]?.employmentType, "实习");
+});
+
+test("parseResume reads the target hiring track from a preference line", () => {
+  const { profile } = parseResume(`
+王芳
+wangfang@example.com
+
+求职意向
+投递类型：社招
+意向岗位：后端开发工程师
+
+工作经历
+示例公司 | 后端开发工程师 | 2020.07 - 2023.06
+• 负责服务端开发
+`);
+  assert.equal(profile.preference.targetTrack, "experienced");
+});
+
 test("parseResume does not invent values from empty text", () => {
   const { profile, warnings } = parseResume("");
   assert.equal(profile.identity.fullName, undefined);
@@ -208,4 +257,57 @@ wangfang@example.com
   assert.equal(profile.contact.email, "wangfang@example.com");
   assert.equal(profile.experience.length, 1);
   assert.equal(profile.experience[0]?.dates?.current, true);
+  assert.equal(profile.experience[0]?.employmentType, "工作");
+});
+
+test("a name label that also states city and availability is split into three facts", () => {
+  const { profile } = parseResume(`
+姓名：林晓 目前在京，可一周内到岗
+邮箱：linxiao@example.com
+`);
+  assert.equal(profile.identity.fullName, "林晓");
+  assert.equal(profile.contact.currentCity, "北京");
+  assert.equal(profile.preference.availableFrom, "一周内到岗");
+});
+
+test("成绩排名 is not written into GPA, and 学位 is derived from 学历", () => {
+  const { profile } = parseResume(`
+教育经历
+示例大学 计算机科学与技术 本科 2022.09 - 2026.06
+成绩排名：前18%
+GPA：3.8/4.0
+`);
+  const education = profile.education[0];
+  assert.equal(education?.gpa, "3.8/4.0");
+  assert.equal(education?.rank, "前18%");
+  assert.equal(education?.academicDegree, "学士");
+});
+
+test("a flexible city statement is not stored as a city, and graduation is not availability", () => {
+  const { profile, warnings } = parseResume(`
+姓名：林晓
+可一周内到岗
+
+求职意向
+期望城市：多个城市均可，可调剂
+到岗时间：预计2029年7月
+`);
+  assert.deepEqual(profile.preference.cities, []);
+  assert.match(profile.preference.relocation ?? "", /多个城市|调剂/);
+  assert.equal(profile.preference.availableFrom, "一周内到岗");
+  assert.ok(warnings.some((warning) => warning.includes("毕业时间")));
+});
+
+test("certificates and awards are recovered without a skills heading", () => {
+  const { profile, warnings } = parseResume(`
+姓名：林晓
+
+教育经历
+示例大学 计算机科学与技术 本科 2022.09 - 2026.06
+2024年 国家奖学金
+CET-6 (585)
+`);
+  assert.ok(profile.skills.certificates.some((item) => item.includes("CET-6")));
+  assert.ok(profile.skills.awards.some((item) => item.includes("国家奖学金")));
+  assert.ok(warnings.some((warning) => warning.includes("技能/证书")));
 });

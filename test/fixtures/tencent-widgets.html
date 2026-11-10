@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>腾讯式复合控件</title>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 32px; color: #222; }
+      .info_box { margin-bottom: 18px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 6px; }
+      .subtitleBold { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+      input, select { font-size: 14px; padding: 6px 8px; min-width: 260px; }
+      .el-checkbox__original { width: 0; height: 0; opacity: 0; }
+      .el-checkbox__label { margin-left: 6px; }
+      .el-dropdown-link { display: inline-block; margin-right: 12px; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+      .el-select { position: relative; width: 320px; }
+      .el-select__input { width: 0; height: 0; min-width: 0; padding: 0; border: 0; }
+      .el-select__tags { min-height: 1px; }
+      .el-select-dropdown { display: none; position: absolute; z-index: 2; background: #fff; border: 1px solid #ccc; }
+      .el-select-dropdown.is-open { display: block; }
+      .el-select-dropdown__item { padding: 4px 8px; cursor: pointer; list-style: none; }
+      .el-select-dropdown__item.is-selected { background: #eef; }
+      .el-tag { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 6px; background: #eef; border-radius: 3px; }
+    </style>
+  </head>
+  <body>
+    <h2>教育经历</h2>
+
+    <!--
+      A group heading above the field's own subtitle. The scanner must read
+      “国家/地区”, not the shorter heading “证件信息” above it.
+    -->
+    <div class="info_box nationality">
+      <div class="subtitleBold">证件信息</div>
+      <div class="subtitle">国家/地区*</div>
+      <div class="input_box">
+        <select id="nationality">
+          <option value="">请选择您的国家/地区</option>
+          <option value="cn">中国</option>
+          <option value="hk">中国香港</option>
+        </select>
+      </div>
+    </div>
+
+    <!--
+      Tencent's 起止时间 row: two date inputs under one subtitle, plus an
+      Element-UI checkbox whose real input is 0×0 and transparent. The checkbox
+      caption must label the checkbox only; the dates keep 起止时间.
+    -->
+    <div class="info_box period">
+      <div class="subtitle">起止时间*</div>
+      <div class="input_box">
+        <input id="periodStart" type="text" placeholder="选择日期" />
+        <span>-</span>
+        <input id="periodEnd" type="text" placeholder="选择日期" />
+        <label class="el-checkbox sofar_check">
+          <input class="el-checkbox__original" type="checkbox" />
+          <span class="el-checkbox__label">至今</span>
+        </label>
+      </div>
+    </div>
+
+    <!--
+      Tencent's identity box: one subtitle (“个人证件”) above two controls — a
+      dropdown trigger for the document type and a free-text input for the
+      number. The input's placeholder is the only text that names its question.
+    -->
+    <div class="info_box identity">
+      <div class="subtitle">个人证件*</div>
+      <span class="el-dropdown-link" role="button" aria-haspopup="list">居民身份证</span>
+      <input id="idNumber" type="text" placeholder="请填写您的证件号码" />
+    </div>
+
+    <!-- The page asks for a band, while the resume stores “6/140”. -->
+    <div class="info_box">
+      <div class="subtitle">成绩排名</div>
+      <select id="rank">
+        <option value="">请选择成绩排名</option>
+        <option value="top5">前5%</option>
+        <option value="top10">前10%</option>
+        <option value="top20">前20%</option>
+        <option value="other">其他</option>
+      </select>
+    </div>
+
+    <!--
+      Tencent's 开发语言 control: an Element-UI multiple select. The visible
+      input is read-only; the search input inside the tag list is 0×0. Choosing
+      a value means clicking an option, not typing. `SQL` is offered here even
+      though the seeded resume never names it, which keeps the assertion about
+      “only values the widget can express” meaningful.
+    -->
+    <div class="info_box languages">
+      <div class="subtitle">开发语言</div>
+      <div class="input_box">
+        <div class="el-select" id="languages">
+          <div class="el-select__tags">
+            <input class="el-select__input" type="text" />
+          </div>
+          <div class="el-input el-input--suffix">
+            <input class="el-input__inner" type="text" readonly placeholder="请输入你擅长的开发语言" />
+            <span class="el-input__suffix"></span>
+          </div>
+          <div class="el-select-dropdown is-multiple">
+            <ul class="el-scrollbar__view">
+              <li class="el-select-dropdown__item">Go</li>
+              <li class="el-select-dropdown__item">Java</li>
+              <li class="el-select-dropdown__item">Python</li>
+              <li class="el-select-dropdown__item">SQL</li>
+              <li class="el-select-dropdown__item">TypeScript</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const languages = document.querySelector("#languages");
+      const tags = languages.querySelector(".el-select__tags");
+      const menu = languages.querySelector(".el-select-dropdown");
+      languages.querySelector(".el-input").addEventListener("click", () => menu.classList.add("is-open"));
+      document.addEventListener("click", (event) => {
+        if (!languages.contains(event.target)) menu.classList.remove("is-open");
+      });
+      for (const option of languages.querySelectorAll(".el-select-dropdown__item")) {
+        option.addEventListener("click", () => {
+          const label = option.textContent.trim();
+          const existing = [...tags.querySelectorAll(".el-tag")].find((tag) => tag.textContent.trim() === label);
+          if (existing) {
+            existing.remove();
+            option.classList.remove("is-selected");
+            return;
+          }
+          const tag = document.createElement("span");
+          tag.className = "el-tag";
+          tag.textContent = label;
+          tags.insertBefore(tag, tags.querySelector(".el-select__input"));
+          option.classList.add("is-selected");
+        });
+      }
+    </script>
+  </body>
+</html>

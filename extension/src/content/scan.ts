@@ -10,6 +10,8 @@
 import {
   classifyFields,
   detectSection,
+  experienceKindFromLabel,
+  inferHiringTrack,
   type FieldDescriptor,
   type FieldKind,
   type FieldOption,
@@ -86,7 +88,18 @@ function detectKind(element: HTMLElement): FieldKind {
   if (tag === "textarea") return "textarea";
   if (element.isContentEditable) return "contenteditable";
   if (tag === "select") return "select";
-  if (tag !== "input") return "unknown";
+  if (tag !== "input") {
+    /*
+     * Custom dropdown triggers are not inputs. Element UI's identity-type,
+     * foreign-exam and similar menus render a `<span role="button">` inside
+     * `.el-dropdown`; without this branch the whole question was invisible to
+     * the scanner even though every other field around it was found.
+     */
+    const role = element.getAttribute("role");
+    if (role === "combobox") return "combobox";
+    if (role === "button" && element.closest("[class*='dropdown'],[class*='Dropdown']")) return "combobox";
+    return "unknown";
+  }
 
   const type = (element as HTMLInputElement).type?.toLowerCase() ?? "text";
   switch (type) {
@@ -143,13 +156,14 @@ function readSelectOptions(element: HTMLSelectElement): FieldOption[] {
  */
 function readCustomOptions(element: HTMLElement, framework: WidgetFramework): FieldOption[] {
   const scope =
-    element.closest("[class*='select'],[class*='Select'],[class*='dropdown'],[class*='Dropdown']")?.parentElement ??
-    element.parentElement;
+    element.closest(
+      "[class*='select'],[class*='Select'],[class*='dropdown'],[class*='Dropdown'],[class*='cascader'],[class*='Cascader']",
+    )?.parentElement ?? element.parentElement;
   if (!scope) return [];
 
   const selectorsByFramework: Partial<Record<WidgetFramework, string>> = {
-    antd: ".ant-select-item-option[title], .ant-select-item-option",
-    "element-ui": ".el-select-dropdown__item",
+    antd: ".ant-select-item-option[title], .ant-select-item-option, .ant-cascader-menu-item, .ant-dropdown-menu-item",
+    "element-ui": ".el-select-dropdown__item, .el-dropdown-menu__item, .el-cascader-node",
     "react-select": "[class*='option']",
     select2: ".select2-results__option",
     vant: ".van-picker-column__item",
@@ -170,13 +184,39 @@ function readCustomOptions(element: HTMLElement, framework: WidgetFramework): Fi
   return found;
 }
 
-/** Group radio buttons by `name`, since each is a separate input. */
+/**
+ * The container that holds one radio group.
+ *
+ * Element UI renders `<input class="el-radio__original">` with **no name**, so
+ * grouping by `name` treated 男 and 女 as two independent fields and the
+ * scanner emitted the same group twice. The enclosing radio group / info box
+ * is the real group identity.
+ */
+function radioGroupContainer(element: HTMLElement): HTMLElement {
+  return (
+    element.closest<HTMLElement>(
+      ".el-radio-group, .ant-radio-group, [role='radiogroup'], fieldset, .info_box, .el-form-item, .ant-form-item, .form-item",
+    ) ??
+    element.parentElement ??
+    element
+  );
+}
+
+function radioGroupKey(element: HTMLElement): string {
+  const name = element.getAttribute("name");
+  if (name) return name;
+  const container = radioGroupContainer(element);
+  return container === element ? buildRef(element, "") : `group:${domPath(container)}`;
+}
+
+/** Group radio buttons by `name`, or by their enclosing group when unnamed. */
 function readRadioGroup(element: HTMLInputElement, scope: ParentNode): FieldDescriptor["options"] {
   const name = element.getAttribute("name");
-  if (!name) return undefined;
+  const inputs = name
+    ? Array.from(scope.querySelectorAll<HTMLInputElement>(`input[type='radio'][name="${CSS.escape(name)}"]`))
+    : Array.from(radioGroupContainer(element).querySelectorAll<HTMLInputElement>("input[type='radio']"));
   const options: FieldOption[] = [];
-  const escaped = CSS.escape(name);
-  for (const input of Array.from(scope.querySelectorAll<HTMLInputElement>(`input[type='radio'][name="${escaped}"]`))) {
+  for (const input of inputs) {
     /*
      * `??` does not fall through an empty string, so `(cond ? text : "") ?? next`
      * returned "" whenever the input had no id — which is most of them. The
@@ -210,7 +250,7 @@ function firstNonEmpty(...candidates: Array<string | null | undefined>): string 
 function detectFramework(element: HTMLElement): WidgetFramework {
   const signatures: Array<[string, WidgetFramework]> = [
     ["[class*='ant-select'],[class*='ant-input'],[class*='ant-form']", "antd"],
-    ["[class*='el-select'],[class*='el-input'],[class*='el-form']", "element-ui"],
+    ["[class*='el-select'],[class*='el-input'],[class*='el-form'],[class*='el-cascader'],[class*='el-dropdown'],[class*='el-date-editor']", "element-ui"],
     ["[class*='select__control'],[class*='react-select']", "react-select"],
     ["[class*='select2'],[class*='select2-container']", "select2"],
     ["[class*='van-field'],[class*='van-picker']", "vant"],
@@ -229,6 +269,26 @@ function detectFramework(element: HTMLElement): WidgetFramework {
   return "native";
 }
 
+/**
+ * Whether a custom widget accepts more than one option.
+ *
+ * Element UI renders a multi-select as a normal `.el-select` with a tag list
+ * (`.el-select__tags`) and a read-only value input; Ant Design uses a class.
+ * The underlying `<input>` never says `multiple`, so the widget has to.
+ */
+function detectMultiple(element: HTMLElement): boolean {
+  if (element instanceof HTMLSelectElement && element.multiple) return true;
+  if (element.getAttribute("aria-multiselectable") === "true") return true;
+  const widget = element.closest<HTMLElement>(".el-select, .ant-select");
+  if (!widget) return false;
+  return (
+    widget.classList.contains("ant-select-multiple") ||
+    widget.hasAttribute("multiple") ||
+    widget.querySelector(".el-select__tags") !== null ||
+    widget.querySelector(".el-select-dropdown.is-multiple") !== null
+  );
+}
+
 /* ------------------------------------------------------------------- scan */
 
 /** Elements that could be a fillable field. */
@@ -240,7 +300,8 @@ const FIELD_SELECTOR = [
   "[contenteditable='']",
   "[role='textbox']",
   "[role='combobox']",
-  "[role='listbox']",
+  "[role='button'][aria-haspopup]",
+  ".el-dropdown-link",
 ].join(",");
 
 const MAX_FIELDS = 400;
@@ -249,6 +310,145 @@ function sectionFromText(...parts: Array<string | undefined>): FieldSection {
   const text = parts.filter(Boolean).join(" ");
   if (!text) return "unknown";
   return detectSection(text);
+}
+
+/**
+ * Recover the heading of a nearby repeatable section from its own container.
+ *
+ * `nearestHeading` follows preceding siblings, which works for simple forms but
+ * can miss ATS layouts where a section title is the first child of a wrapper
+ * containing all rows. A generic label like “描述” then loses the work/project
+ * distinction. Walk outward and inspect only heading-like descendants; accept
+ * the narrowest ancestor with one unambiguous experience/education/project
+ * heading. A form-level wrapper containing several sections is skipped.
+ */
+function repeatableSectionHeading(element: HTMLElement): string | undefined {
+  const selector = [
+    "h1", "h2", "h3", "h4", "h5", "h6", "legend", '[role="heading"]',
+    '[class*="title"]', '[class*="Title"]', '[class*="header"]', '[class*="Header"]',
+  ].join(",");
+
+  let ancestor = element.parentElement;
+  for (let depth = 0; depth < 9 && ancestor && ancestor !== document.body; depth += 1) {
+    const headings = new Set<string>();
+    for (const candidate of ancestor.querySelectorAll<HTMLElement>(selector)) {
+      const text = candidate.innerText?.replace(/\\s+/g, " ").trim() ?? candidate.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+      if (text.length < 2 || text.length > 40) continue;
+      const section = detectSection(text);
+      if (section === "education" || section === "experience" || section === "project") headings.add(text);
+    }
+    if (headings.size === 1) return [...headings][0];
+
+    ancestor = ancestor.parentElement;
+  }
+  return undefined;
+}
+
+/**
+ * Classify only explicit recruitment labels. A field heading such as “实习经历”
+ * should not turn an otherwise ordinary campus application into an internship
+ * application, so this reads page titles, routes and prominent page copy first.
+ */
+function detectHiringTrack(): PageScan["hiringTrack"] {
+  const headings = Array.from(document.querySelectorAll<HTMLElement>("h1,h2,h3,[role='heading']"))
+    .slice(0, 12)
+    .map((element) => element.textContent ?? "")
+    .join(" ");
+  const titleAndRoute = `${document.title} ${window.location.pathname} ${headings}`;
+  const bodyText = (document.querySelector("main")?.textContent ?? document.body?.textContent ?? "").slice(0, 2_400);
+  return inferHiringTrack(titleAndRoute, bodyText);
+}
+
+/** Capture explicit job-posting copy for choosing among the person's resume dossiers. */
+function detectJobContext(): string | undefined {
+  const selectors = [
+    "[class*='job-description']",
+    "[class*='jobDescription']",
+    "[class*='job-detail']",
+    "[class*='jobDetail']",
+    "[class*='position-detail']",
+    "[class*='positionDetail']",
+    "[data-testid*='job-description']",
+    "article",
+  ].join(",");
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+    .filter(
+      (element) =>
+        isVisible(element) &&
+        !element.closest("quill-panel") &&
+        !element.querySelector("form"),
+    )
+    .map((element) => cleanJobText(element.innerText || element.textContent || "").slice(0, 6_000))
+    .filter((text) => text.length >= 40)
+    .sort((a, b) => b.length - a.length);
+
+  const selected: string[] = [];
+  for (const candidate of candidates) {
+    if (selected.length >= 3 || selected.some((text) => text.includes(candidate))) continue;
+    selected.push(candidate);
+  }
+
+  const metaDescription = document
+    .querySelector<HTMLMetaElement>("meta[name='description'],meta[property='og:description']")
+    ?.content;
+  const context = cleanJobText([metaDescription ?? "", ...selected].filter(Boolean).join("\n"));
+  return context ? context.slice(0, 6_000) : undefined;
+}
+
+function cleanJobText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Decide whether the page wants one current/highest education row or the full
+ * history.
+ *
+ * Tencent is explicit: “当前教育经历 … 如属于已毕业状态，则提供你最高学历的
+ * 教育信息”, and its add control says “添加学历” (for a dual degree or a
+ * previous degree), not “添加教育经历”. A page that asks for a history usually
+ * says so in the control or in the instructions. When neither signal exists we
+ * return `unknown` and leave the existing rows alone rather than inventing
+ * extra ones.
+ */
+function detectEducationPolicy(): PageScan["educationPolicy"] {
+  const text = (document.body.innerText || document.body.textContent || "").replace(/\s+/g, " ");
+  if (/当前教育经历|当前在读|最高学历|最高学位/.test(text)) return "current-only";
+
+  const addTexts = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+    .map((element) => (element.textContent ?? "").replace(/\s+/g, " ").trim())
+    .filter((value) => value.length > 0 && value.length <= 24);
+  if (addTexts.some((value) => /(添加|新增|增加)(教育经历|学习经历|教育背景)/.test(value))) {
+    return "full-history";
+  }
+  if (/(教育|学历).{0,24}(全部|所有|从高中|从本科)|按时间倒序|时间倒序/.test(text)) {
+    return "full-history";
+  }
+  return "unknown";
+}
+
+/**
+ * A small prefix selector that belongs to a larger composite control.
+ *
+ * Tencent's phone field is a country-code `.el-select` (readonly, placeholder
+ * “请输入”) sitting next to the real phone input. Both recovered the same
+ * “手机号码” label, so the plan contained a second phone decision and filling
+ * the country-code select with a phone number failed. The prefix is already
+ * defaulted to +86 and is not a value we should write.
+ */
+function isCompositePrefixInput(element: HTMLElement): boolean {
+  if (!(element instanceof HTMLInputElement) || !element.readOnly) return false;
+  const placeholder = (element.getAttribute("placeholder") ?? "").trim();
+  if (!/^(请输入|请选择)$/.test(placeholder)) return false;
+  const select = element.closest<HTMLElement>(".el-select, .ant-select");
+  if (!select) return false;
+  const box = select.closest<HTMLElement>(".info_box, .el-form-item, .ant-form-item, .form-item") ?? select.parentElement;
+  if (!box) return false;
+  return Array.from(box.querySelectorAll<HTMLInputElement>("input")).some(
+    (input) =>
+      input !== element &&
+      !input.readOnly &&
+      (input.type === "tel" || /手机|电话|phone/i.test(input.getAttribute("placeholder") ?? "")),
+  );
 }
 
 export interface ScanOptions {
@@ -283,14 +483,30 @@ export function scanPage(options: ScanOptions = {}): ScanResult {
     if (descriptors.length >= MAX_FIELDS) break;
     if (!options.includeHidden && !isVisible(element)) continue;
 
+    // Element UI's multiple select has a second, internal search input. It is
+    // not a form field of its own and produced a duplicate “开发语言” question.
+    if (element.matches(".el-select__input")) continue;
+    if (isCompositePrefixInput(element)) continue;
+    /*
+     * `[role=button][aria-haspopup]` also matches site navigation menus. Only
+     * accept a custom trigger that lives inside a form field container; the
+     * user-menu button in a header is not an application question.
+     */
+    if (
+      element.matches("[role='button'][aria-haspopup], .el-dropdown-link") &&
+      !element.closest(".info_box, .el-form-item, .ant-form-item, .form-item, form")
+    ) {
+      continue;
+    }
+
     const kind = detectKind(element);
     if (kind === "unknown") continue;
 
     // Radio groups are represented once, by their first member.
     if (kind === "radio-group") {
-      const name = element.getAttribute("name") ?? buildRef(element, "");
-      if (seenRadioGroups.has(name)) continue;
-      seenRadioGroups.add(name);
+      const groupKey = radioGroupKey(element);
+      if (seenRadioGroups.has(groupKey)) continue;
+      seenRadioGroups.add(groupKey);
     }
 
     const recovered = recoverLabel(element);
@@ -329,6 +545,7 @@ export function scanPage(options: ScanOptions = {}): ScanResult {
 
     const hint = nearbyHint(element);
     const heading = nearestHeading(element);
+    const contextHeading = repeatableSectionHeading(element) ?? heading;
     const framework = detectFramework(element);
     const tag = element.tagName.toLowerCase();
     const inputType = tag === "input" ? (element as HTMLInputElement).type : undefined;
@@ -344,6 +561,17 @@ export function scanPage(options: ScanOptions = {}): ScanResult {
     if (fieldOptions && fieldOptions.length === 0) fieldOptions = undefined;
 
     const maxLength = detectMaxLength(element, hint);
+    const section = sectionFromText(
+      contextHeading,
+      label,
+      hint,
+      element.getAttribute("placeholder") ?? undefined,
+      element.getAttribute("name") ?? undefined,
+    );
+    const experienceKind =
+      section === "experience"
+        ? experienceKindFromLabel(`${contextHeading ?? ""} ${label} ${hint ?? ""}`)
+        : undefined;
 
     const ref = buildRef(element, label);
     // The first element wins: a repeated ref means duplicate markup, and the
@@ -368,14 +596,17 @@ export function scanPage(options: ScanOptions = {}): ScanResult {
       ...(element.getAttribute("pattern") ? { pattern: element.getAttribute("pattern") as string } : {}),
       ...(inputType ? { inputType } : {}),
       ...(fieldOptions ? { options: fieldOptions } : {}),
-      section: sectionFromText(heading, label, hint, element.getAttribute("name") ?? undefined),
-      ...(heading ? { groupHeading: heading } : {}),
+      ...(detectMultiple(element) ? { multiple: true } : {}),
+      section,
+      ...(contextHeading ? { groupHeading: contextHeading } : {}),
+      ...(experienceKind ? { experienceKind } : {}),
       framework,
     });
   }
 
   const classified = classifyFields(descriptors);
   const ats = detectAts();
+  const jobContext = detectJobContext();
 
   return {
     scan: {
@@ -384,7 +615,10 @@ export function scanPage(options: ScanOptions = {}): ScanResult {
       title: document.title,
       siteKey: siteKey(),
       scannedAt: Date.now(),
+      hiringTrack: detectHiringTrack(),
+      ...(jobContext ? { jobContext } : {}),
       fields: classified,
+      educationPolicy: detectEducationPolicy(),
       ...(ats ? { ats } : {}),
     },
     elements: byRef,
@@ -401,9 +635,15 @@ function recoverGroupQuestion(element: HTMLElement): string {
     let sibling = current.previousElementSibling;
     let hops = 0;
     while (sibling && hops < 3) {
-      const text = (sibling.textContent ?? "").replace(/\s+/g, " ").trim();
+      const text = (sibling.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .replace(/[*＊]\s*$/, "")
+        .trim();
+      const hint = sibling.matches(
+        "[class*='tip'],[class*='hint'],[class*='help'],[class*='desc'],[class*='note'],[class*='text_box']",
+      );
       // The question is a short phrase that is not itself an answer option.
-      if (text.length > 1 && text.length <= 40 && !/^(是|否|男|女|有|无)$/.test(text)) {
+      if (!hint && text.length > 1 && text.length <= 40 && !/^(是|否|男|女|有|无)$/.test(text)) {
         return text;
       }
       sibling = sibling.previousElementSibling;
@@ -416,7 +656,18 @@ function recoverGroupQuestion(element: HTMLElement): string {
 
 function isRequired(element: HTMLElement): boolean {
   if (element.getAttribute("required") !== null || element.getAttribute("aria-required") === "true") return true;
-  // Chinese forms mark required fields with an asterisk in the label.
+  /*
+   * Chinese forms mark required fields with an asterisk in the label, and UI
+   * kits often express it as a class (`.must`, `is-required`) rather than an
+   * HTML attribute. Look at the field's own container first; the nearest `div`
+   * is usually the input wrapper and contains no label at all.
+   */
+  const box = element.closest(".info_box, .el-form-item, .ant-form-item, .form-item, .form-group");
+  if (box) {
+    const labelNode = box.querySelector(".subtitle, .el-form-item__label, .ant-form-item-label, label, legend");
+    if (labelNode && /[*＊]/.test(labelNode.textContent ?? "")) return true;
+    if (box.querySelector(".must, .required, .is-required, .ant-form-item-required")) return true;
+  }
   const labelText = element.closest("label,tr,.form-item,.form-group,div")?.textContent ?? "";
   if (/[*＊]\s*$/.test(labelText.slice(0, 80)) || /^\s*[*＊]/.test(labelText)) return true;
   if (element.classList.contains("required") || element.classList.contains("is-required")) return true;

@@ -8,6 +8,7 @@
  */
 
 import {
+  ABSENCE_KEYS,
   DEFINITION_BY_KEY,
   type FieldDefinition,
   FIELD_DEFINITIONS,
@@ -191,12 +192,30 @@ const ATTRIBUTE_HINTS: Array<{ test: RegExp; key: string }> = [
  */
 const SECTION_SIGNALS: Array<{ test: RegExp; section: FieldSection }> = [
   { test: /教育|学历|学习|院校|school|education|academic|académ/i, section: "education" },
-  { test: /工作|实习|任职|就职|经历|experience|employment|work history/i, section: "experience" },
+  /*
+   * Order matters: a heading like 项目经历 contains the generic word 经历, and
+   * 期望工作城市 contains 工作. The more specific sections must be tested before
+   * the broad experience pattern, or every project date row is read as a job.
+   */
   { test: /项目|课题|project/i, section: "project" },
+  { test: /求职|意向|意愿|期望|preference|expectation/i, section: "preference" },
+  { test: /工作|实习|任职|就职|经历|experience|employment|work history/i, section: "experience" },
+  /*
+   * Reference fields belong to the work entry they describe, even though the
+   * only word in the label is 电话. Tencent puts the field in the contact block
+   * visually, and without this signal the classifier penalised every referee key
+   * for a section mismatch.
+   */
+  { test: /证明人|推荐人|介绍人|referee|reference/i, section: "experience" },
   { test: /联系|联络|contact/i, section: "contact" },
   { test: /基本|个人信息|个人资料|身份|personal|identity|basic info/i, section: "identity" },
+  /*
+   * An essay prompt often lists what it wants ("专业技能、爱好特长、补充信息"),
+   * so without this signal the word 技能 won and Tencent's 补充信息 textarea was
+   * read as a skills summary.
+   */
+  { test: /自我评价|自我介绍|补充信息|补充说明|爱好特长|职业规划|开放题|自述|essay|additional/i, section: "essay" },
   { test: /技能|专长|证书|skill|certificat|competenc/i, section: "skill" },
-  { test: /求职|意向|意愿|期望|preference|expectation/i, section: "preference" },
   { test: /自述|开放|问答|题|essay|question|additional/i, section: "essay" },
 ];
 
@@ -243,6 +262,14 @@ function scoreDefinition(definition: FieldDefinition, field: FieldDescriptor, ch
   if (definition.excludes) {
     const matchedAliasNormalized = normalize(matchedAlias);
     for (const channel of channels) {
+      /*
+       * A long hint is often an autocomplete suggestion list, not prose about
+       * this field. Tencent's school input carries a list of university names as
+       * its hint; the word 学院 inside that list tripped education.school's
+       * exclusion and the field was classified as unknown. Long hints still help
+       * choose a key, but they must not veto one.
+       */
+      if (channel.source === "hint" && channel.text.length > 20) continue;
       for (const exclusion of definition.excludes) {
         const exclusionNormalized = normalize(exclusion);
         if (!exclusionNormalized) continue;
@@ -271,7 +298,7 @@ function scoreDefinition(definition: FieldDefinition, field: FieldDescriptor, ch
 
   // Section agreement: reward when the definitions' section matches what the
   // surrounding markup suggests.
-  const context = [field.groupHeading, field.label, field.hint, field.name, field.id]
+  const context = [field.groupHeading, field.label, field.hint, field.placeholder, field.name, field.id]
     .filter(Boolean)
     .join(" ");
   const contextSection = field.section !== "unknown" ? field.section : detectSection(context);
@@ -317,6 +344,8 @@ const SECTION_QUALIFIERS: Record<string, Record<string, string>> = {
     "岗位": "work.title",
     "职位": "work.title",
     "公司": "work.company",
+    // Tencent's resume editor labels the responsibilities textarea "描述".
+    "描述": "work.description",
   },
   project: {
     name: "project.name",
@@ -324,6 +353,12 @@ const SECTION_QUALIFIERS: Record<string, Record<string, string>> = {
     "开始时间": "project.startDate",
     "结束时间": "project.endDate",
     "描述": "project.description",
+  },
+  skill: {
+    // Tencent's language row labels the score box only "分数"; the exam select
+    // beside it carries the question. Inside the language block the bare label
+    // is unambiguous, but outside it 分数 could be any score.
+    "分数": "skill.languageScore",
   },
 };
 
@@ -340,8 +375,27 @@ export function classifyField(field: FieldDescriptor): Classification {
     }
   }
 
-  // 2. Section-scoped rewrites for short, ambiguous labels.
-  const contextText = [field.groupHeading, field.label, field.section, field.name].filter(Boolean).join(" ");
+  /*
+   * 2. “无实习经历 / 无项目经历 / 无获奖信息” are negative declarations. A
+   * checkbox stating that a section is empty must never be read as a value
+   * field that merely mentions the section: 无项目经历 scored as project
+   * description and 无实习经历 as employment type, so the panel offered a whole
+   * project paragraph for a checkbox. Exact label equality is required, which
+   * keeps a real “实习” choice from being captured here.
+   */
+  if (field.kind === "checkbox" && field.label) {
+    const label = normalize(field.label);
+    for (const definition of FIELD_DEFINITIONS) {
+      if (!ABSENCE_KEYS.has(definition.key)) continue;
+      if (definition.aliases.some((alias) => normalize(alias) === label)) {
+        notes.push("negative declaration");
+        return { key: definition.key, score: 0.95, notes };
+      }
+    }
+  }
+
+  // 3. Section-scoped rewrites for short, ambiguous labels.
+  const contextText = [field.groupHeading, field.label, field.section, field.placeholder, field.name].filter(Boolean).join(" ");
   const section = field.section !== "unknown" ? field.section : detectSection(contextText);
   if (section !== "unknown" && field.label) {
     const qualifiers = SECTION_QUALIFIERS[section];
@@ -354,7 +408,7 @@ export function classifyField(field: FieldDescriptor): Classification {
     }
   }
 
-  // 3. General scoring across all evidence channels.
+  // 4. General scoring across all evidence channels.
   const channels = channelsOf(field);
   let best: { key: string; score: number } | null = null;
   let runnerUp: { key: string; score: number } | undefined;
@@ -434,7 +488,7 @@ export function classifyField(field: FieldDescriptor): Classification {
 export function classifyFields(fields: FieldDescriptor[]): FieldDescriptor[] {
   const counts = new Map<string, number>();
 
-  return fields.map((field) => {
+  const classified = fields.map((field) => {
     const classification = classifyField(field);
 
     // Keep the classifier's guess, but let an explicitly-scanned section win.
@@ -473,6 +527,98 @@ export function classifyFields(fields: FieldDescriptor[]): FieldDescriptor[] {
       ...(repeatIndex !== undefined ? { repeatIndex } : {}),
     };
   });
+
+  return pairDateRanges(classified);
+}
+
+/**
+ * Pair split date-range controls.
+ *
+ * Tencent's resume editor renders one logical question — 起止时间 — as two
+ * element-ui date inputs separated by a literal "-". Neither input contains the
+ * word 开始 or 结束, so each is unclassifiable on its own, and six fields on the
+ * page (education, experience, project) went missing. Pairing is deliberately
+ * conservative: both halves must be unclassified or only weakly guessed,
+ * adjacent, in the same section, and date-like, and the first must be labelled
+ * as a range.
+ */
+const RANGE_LABEL = /(起止|时间范围|日期范围)/;
+const RANGE_TAIL = /^[-–—~～至到]$/;
+
+function pairDateRanges(fields: FieldDescriptor[]): FieldDescriptor[] {
+  const out = fields.map((field) => ({ ...field }));
+
+  for (let index = 0; index < out.length - 1; index += 1) {
+    const first = out[index];
+    const second = out[index + 1];
+    if (!first || !second) continue;
+    /*
+     * A weak guess can still be wrong. Tencent's experience range inputs were
+     * classified as work.employmentType at 0.44 and 0.33 because the group
+     * heading contained 实习; the pair is far better evidence than either field
+     * alone, so it may overwrite an uncertain classification.
+     */
+    const uncertain = (item: FieldDescriptor) => item.key === "unknown" || (item.keyConfidence ?? 0) < 0.6;
+    if (!uncertain(first) || !uncertain(second)) continue;
+    if (!RANGE_LABEL.test(first.label)) continue;
+    const tail = second.label.replace(/\s+/g, "");
+    /*
+     * The end half is either the literal "-" separator or the same container
+     * label recovered twice: Tencent puts both date inputs inside the same
+     * `.info_box` whose only `.subtitle` is 起止时间, so the label recovery in
+     * the content script legitimately returns 起止时间 for both halves.
+     */
+    const sameRangeLabel = tail !== "" && normalize(tail) === normalize(first.label);
+    if (tail !== "" && !RANGE_TAIL.test(tail) && !sameRangeLabel) continue;
+    if (first.section !== second.section) continue;
+    const prefix = rangePrefix(first.section);
+    if (!prefix) continue;
+    if (!isDateish(first) && !isDateish(second)) continue;
+
+    const baseLabel = first.label.replace(/\s*（(开始|结束)）\s*$/, "");
+    out[index] = {
+      ...first,
+      label: `${baseLabel}（开始）`,
+      key: `${prefix}.startDate`,
+      keyConfidence: 0.86,
+    };
+    out[index + 1] = {
+      ...second,
+      label: `${baseLabel}（结束）`,
+      key: `${prefix}.endDate`,
+      keyConfidence: 0.86,
+    };
+  }
+
+  /*
+   * The first classification pass counted keys before the pairing above ran, so
+   * a second 起止时间 row would otherwise overwrite the first entry instead of
+   * becoming row 2. Recount only the pairs' keys, leaving any repeat index the
+   * classifier already assigned untouched.
+   */
+  const seen = new Map<string, number>();
+  for (let index = 0; index < out.length; index += 1) {
+    const field = out[index];
+    if (!field || !field.key || field.key === "unknown") continue;
+    const count = (seen.get(field.key) ?? 0) + 1;
+    seen.set(field.key, count);
+    if (count > 1 && isRepeatable(field.section) && field.repeatIndex === undefined) {
+      out[index] = { ...field, repeatIndex: count };
+    }
+  }
+
+  return out;
+}
+
+function rangePrefix(section: FieldSection): string | undefined {
+  if (section === "education") return "education";
+  if (section === "experience") return "work";
+  if (section === "project") return "project";
+  return undefined;
+}
+
+function isDateish(field: FieldDescriptor): boolean {
+  return field.kind === "date" || /(日期|时间|date)/i.test(field.placeholder ?? "");
 }
 
 function isRepeatable(section: FieldSection): boolean {

@@ -8,7 +8,9 @@ import {
   considerObservation,
   decideForField,
   indexMemory,
+  inferHiringTrack,
   maskValue,
+  normalize,
   parseResume,
   planSummary,
   readProfile,
@@ -143,6 +145,145 @@ test("decideForField marks missing when nothing can answer the field", () => {
   assert.equal(decision.value, undefined);
   assert.equal(decision.required, true);
   assert.equal(decision.confidence, 0);
+});
+
+test("a non-URL value is never proposed for a homepage field", () => {
+  const profile = profileOf();
+  profile.contact.homepage = "连接";
+  const decision = decideForField(
+    field("个人主页链接", { key: "contact.homepage" }),
+    baseContext(profile),
+  );
+  assert.equal(decision.status, "missing");
+  assert.equal(decision.value, undefined);
+});
+
+test("a learned non-URL answer is filtered the same way", () => {
+  const profile = profileOf();
+  const memory: MemoryEntry[] = [
+    {
+      id: "m-home",
+      key: "contact.homepage",
+      labelSnapshot: "个人主页链接",
+      value: "连接",
+      siteKey: "join.qq.com",
+      hits: 1,
+      createdAt: 0,
+      updatedAt: 10,
+      reviewed: true,
+    },
+  ];
+  const decision = decideForField(
+    field("个人主页链接", { key: "contact.homepage" }),
+    baseContext(profile, memory),
+  );
+  assert.equal(decision.status, "missing");
+});
+
+test("a domain without a scheme is still a usable homepage", () => {
+  const profile = profileOf();
+  profile.contact.homepage = "github.com/lisiyuan";
+  const decision = decideForField(
+    field("个人主页链接", { key: "contact.homepage" }),
+    baseContext(profile),
+  );
+  assert.equal(decision.status, "ready");
+  assert.equal(decision.value?.text, "github.com/lisiyuan");
+});
+
+test("a competition honour inside education answers the awards row", () => {
+  const { profile } = parseResume(`
+教育经历
+2023.09 - 2026.06 中国科学院大学 硕士
+2024.06 中国科学院大学计算机设计大赛省赛二等奖
+`);
+  const context = baseContext(profile);
+  const name = decideForField(field("奖项名称", { key: "skill.awards", section: "skill" }), context);
+  assert.equal(name.status, "ready");
+  assert.ok(name.value?.text.includes("计算机设计大赛"));
+  const level = decideForField(field("获奖类型", { key: "skill.awardLevel", section: "skill" }), context);
+  assert.equal(level.value?.text, "竞赛");
+  const date = decideForField(field("获奖时间", { key: "skill.awardDate", section: "skill" }), context);
+  assert.equal(date.value?.text, "2024-06");
+});
+
+test("an absence checkbox never receives a section's text value", () => {
+  const profile = profileOf();
+  assert.ok(profile.projects.length > 0, "this resume has a project to confuse the checkbox with");
+  const decision = decideForField(
+    field("无项目经历", { key: "meta.noProjects", kind: "checkbox", section: "project" }),
+    baseContext(profile),
+  );
+  assert.equal(decision.status, "missing");
+  assert.equal(decision.value, undefined);
+});
+
+test("the language exam and its score are read out of resume prose", () => {
+  const profile = profileOf();
+  const exam = decideForField(
+    field("外语考试/等级", { key: "skill.language", kind: "combobox", section: "skill" }),
+    baseContext(profile),
+  );
+  assert.equal(exam.status, "ready");
+  assert.equal(exam.value?.text, "CET-6");
+  const score = decideForField(
+    field("分数", { key: "skill.languageScore", section: "skill" }),
+    baseContext(profile),
+  );
+  assert.equal(score.value?.text, "560");
+});
+
+test("开发语言 offers languages from the resume, not its frameworks", () => {
+  const profile = profileOf();
+  const decision = decideForField(
+    field("开发语言", { key: "skill.programming", kind: "combobox", section: "skill" }),
+    baseContext(profile),
+  );
+  assert.equal(decision.status, "ready");
+  const values = decision.value?.multiple ?? [];
+  assert.deepEqual([...values].sort(), ["JavaScript", "Python", "TypeScript"]);
+});
+
+test("开发语言 can fall back to resume prose in an old profile", () => {
+  const profile = profileOf();
+  profile.skills.items = [];
+  profile.experience = [];
+  // No rawText either: this is what a profile stored by an older build looks
+  // like. The stack survives only inside the parsed project description.
+  profile.rawText = undefined;
+  profile.projects = [
+    { id: "project-1", highlights: ["负责服务端开发，技术栈：Python / FastAPI / React"] },
+  ];
+  const decision = decideForField(
+    field("开发语言", { key: "skill.programming", kind: "combobox", section: "skill" }),
+    baseContext(profile),
+  );
+  assert.equal(decision.status, "ready");
+  assert.deepEqual(decision.value?.multiple, ["Python"]);
+});
+
+test("a multi-select matches each value against its own option list", () => {
+  const profile = profileOf();
+  profile.skills.items = ["Python", "JavaScript", "TypeScript", "Go", "SQL"];
+  const options = [
+    "C", "C++", "C#", "Go", "Groovy", "Java", "JavaScript", "Kotlin",
+    "PHP", "Python", "Ruby", "Scala", "Swift", "TypeScript", "其他",
+  ].map((label) => ({ value: label, label }));
+  const decision = decideForField(
+    field("开发语言", {
+      key: "skill.programming",
+      options,
+      multiple: true,
+      framework: "element-ui",
+      section: "skill",
+    }),
+    baseContext(profile),
+  );
+  // SQL is not one of the widget's choices, so the answer is partial and the
+  // panel offers it for review rather than claiming the whole list was filled.
+  assert.equal(decision.status, "review");
+  assert.deepEqual(decision.value?.multiple, ["Python", "JavaScript", "TypeScript", "Go"]);
+  assert.ok(!(decision.value?.multiple ?? []).includes("SQL"));
 });
 
 test("decideForField never proposes a value for a captcha", () => {
@@ -342,7 +483,22 @@ test("buildPlan orders work and reports a tally", () => {
   assert.ok(plan.notes.length > 0, "the plan should explain what it could not do");
 });
 
-test("buildPlan indexes repeated rows so the 2nd school reads the 2nd entry", () => {
+test("buildPlan treats absence declarations as hands-off", () => {
+  const scan = scanOf([
+    field("无项目经历", { key: "meta.noProjects", kind: "checkbox", section: "project" }),
+    field("项目名称", { key: "project.name", section: "project" }),
+  ]);
+  const plan = buildPlan(scan, baseContext(profileOf()));
+  const absence = plan.decisions.find((decision) => decision.key === "meta.noProjects");
+  assert.equal(absence?.status, "missing");
+  assert.equal(absence?.value, undefined);
+  assert.ok(
+    plan.notes.some((note) => note.includes("「无实习 / 项目 / 获奖」")),
+    plan.notes.join("\n"),
+  );
+});
+
+test("buildPlan indexes repeated rows highest degree first", () => {
   const profile = profileOf();
   profile.education.push({
     id: "edu-2",
@@ -356,8 +512,140 @@ test("buildPlan indexes repeated rows so the 2nd school reads the 2nd entry", ()
   ]);
   const plan = buildPlan(scan, baseContext(profile));
   const [first, second] = plan.decisions;
-  assert.equal(first?.value?.text, "同济大学");
-  assert.equal(second?.value?.text, "清华大学");
+  /*
+   * Education is sorted by degree rank, then end date. The master's record is
+   * row 1 and the bachelor's row 2 — the order Tencent's own getEducation()
+   * enforces and the order most ATS forms expect for a full history.
+   */
+  assert.equal(first?.value?.text, "清华大学");
+  assert.equal(second?.value?.text, "同济大学");
+});
+
+test("buildPlan explains the page's education policy", () => {
+  const scan = scanOf([
+    field("学校名称", { key: "education.school", section: "education" }),
+  ]);
+  scan.educationPolicy = "current-only";
+  const plan = buildPlan(scan, baseContext(profileOf()));
+  assert.ok(plan.notes.some((note) => note.includes("当前/最高学历")), plan.notes.join("\n"));
+
+  scan.educationPolicy = "full-history";
+  const full = buildPlan(scan, baseContext(profileOf()));
+  assert.ok(full.notes.some((note) => note.includes("完整教育经历")), full.notes.join("\n"));
+});
+
+test("resolveField splits a GPA into value and scale columns", () => {
+  const profile = profileOf();
+  profile.education = [
+    {
+      id: "edu-gpa",
+      school: "同济大学",
+      degree: "本科",
+      gpa: "3.7/4.0",
+      dates: { start: "2018-09", end: "2022-06" },
+    },
+  ];
+  const context = { ...baseContext(profile), hasGpaBase: true };
+  const gpa = resolveField(field("GPA-GPA", { key: "education.gpa", section: "education" }), context);
+  const base = resolveField(
+    field("GPA-BASE", { key: "education.gpaBase", section: "education" }),
+    context,
+  );
+  assert.equal(gpa[0]?.value.text, "3.7");
+  assert.equal(base[0]?.value.text, "4.0");
+
+  // A page with a single GPA question keeps the scale in the same box.
+  const single = resolveField(
+    field("GPA", { key: "education.gpa", section: "education" }),
+    baseContext(profile),
+  );
+  assert.equal(single[0]?.value.text, "3.7/4.0");
+});
+
+test("resolveField answers 至今 from the record's current flag", () => {
+  const profile = profileOf();
+  profile.education = [
+    {
+      id: "edu-current",
+      school: "同济大学",
+      degree: "本科",
+      dates: { start: "2018-09", current: true },
+    },
+  ];
+  const current = resolveField(
+    field("至今", { key: "education.current", kind: "checkbox", section: "education" }),
+    baseContext(profile),
+  );
+  assert.equal(current[0]?.value.text, "是");
+
+  profile.education[0]!.dates = { start: "2018-09", end: "2022-06" };
+  const finished = resolveField(
+    field("至今", { key: "education.current", kind: "checkbox", section: "education" }),
+    baseContext(profile),
+  );
+  assert.equal(finished[0]?.value.text, "否");
+});
+
+test("a repeated awards row reads one award per row", () => {
+  const profile = profileOf();
+  profile.skills.awards = ["2024.06 蓝桥杯省一等奖", "2023 年校一等奖学金"];
+  const scan = scanOf([
+    field("获奖类型", { ref: "t1", key: "skill.awardLevel", section: "skill" }),
+    field("奖项名称", { ref: "a1", key: "skill.awards", section: "skill" }),
+    field("获奖时间", { ref: "d1", key: "skill.awardDate", section: "skill" }),
+    field("获奖类型", { ref: "t2", key: "skill.awardLevel", section: "skill" }),
+    field("奖项名称", { ref: "a2", key: "skill.awards", section: "skill" }),
+    field("获奖时间", { ref: "d2", key: "skill.awardDate", section: "skill" }),
+  ]);
+  const plan = buildPlan(scan, baseContext(profile));
+  const byRef = new Map(plan.decisions.map((decision) => [decision.ref, decision]));
+
+  assert.equal(byRef.get("a1")?.value?.text, "2024.06 蓝桥杯省一等奖");
+  assert.equal(byRef.get("a2")?.value?.text, "2023 年校一等奖学金");
+  assert.equal(byRef.get("t1")?.value?.text, "竞赛");
+  assert.equal(byRef.get("t2")?.value?.text, "奖学金");
+  assert.equal(byRef.get("d1")?.value?.text, "2024-06");
+  // The second award only names a year; a month would be invented.
+  assert.equal(byRef.get("d2")?.value, undefined);
+});
+
+test("a single awards field still receives the whole list", () => {
+  const profile = profileOf();
+  profile.skills.awards = ["2024.06 蓝桥杯省一等奖", "2023 年校一等奖学金"];
+  const candidates = resolveField(
+    field("奖项", { key: "skill.awards", section: "skill" }),
+    baseContext(profile),
+  );
+  assert.ok(candidates[0]?.value.text.includes("蓝桥杯"));
+  assert.ok(candidates[0]?.value.text.includes("奖学金"));
+});
+
+test("composeAnswer grounds AI answers in the resume", () => {
+  const profile = profileOf();
+  profile.skills.items.push("Cursor", "Claude Code");
+  profile.projects.push({
+    id: "proj-ai",
+    name: "智能客服助手",
+    role: "后端负责人",
+    summary: "基于大模型构建企业客服问答系统",
+    highlights: ["使用 RAG 将回答准确率提升到 92%", "接入 DeepSeek 与 Claude 两个模型"],
+    stack: ["Python", "DeepSeek"],
+  });
+
+  const tools = composeAnswer("essay.aiTools", profile);
+  assert.ok(tools?.includes("Cursor"), tools);
+  assert.ok(tools?.includes("Claude Code"), tools);
+
+  const projects = composeAnswer("essay.aiProjects", profile);
+  assert.ok(projects?.includes("智能客服助手") || projects?.includes("客服问答"), projects);
+  assert.ok(projects?.includes("DeepSeek"), projects);
+  assert.ok(projects?.includes("RAG"), projects);
+});
+
+test("composeAnswer does not invent AI experience", () => {
+  const profile = profileOf();
+  assert.equal(composeAnswer("essay.aiTools", profile), undefined);
+  assert.equal(composeAnswer("essay.aiProjects", profile), undefined);
 });
 
 test("selectDecisions applies only what was asked for", () => {
@@ -511,6 +799,93 @@ test("considerObservation skips captchas and passwords", () => {
   );
 });
 
+test("recruitment inference distinguishes internship, campus and experienced campaigns", () => {
+  assert.equal(inferHiringTrack("2026 暑期实习招聘", "加入我们"), "internship");
+  assert.equal(inferHiringTrack("2026 校园招聘", "实习经历请填写最近一段"), "campus");
+  assert.equal(inferHiringTrack("社会招聘", "欢迎有工作经验的候选人"), "experienced");
+  assert.equal(inferHiringTrack("职位申请", "实习经历、工作经历、校园招聘、社会招聘"), "unknown");
+});
+
+test("hiring tracks select matching experience records without crossing categories", () => {
+  const profile = profileOf();
+  const template = profile.experience[0] ?? { id: "template", highlights: [] };
+  profile.experience = [
+    { ...template, id: "full-time", company: "正式工作单位", employmentType: "全职" },
+    { ...template, id: "internship", company: "实习单位", employmentType: "实习" },
+  ];
+
+  assert.equal(
+    readProfile(profile, "work.company", { hiringTrack: "campus" })?.value.text,
+    "实习单位",
+  );
+  assert.equal(
+    readProfile(profile, "work.company", { hiringTrack: "experienced" })?.value.text,
+    "正式工作单位",
+  );
+  assert.equal(
+    readProfile(profile, "work.company", { hiringTrack: "experienced", experienceKind: "internship" })?.value.text,
+    "实习单位",
+  );
+});
+
+test("unlabelled experiences need confirmation on a classified hiring page", () => {
+  const profile = profileOf();
+  const source = profile.experience[0] ?? { id: "template", highlights: [] };
+  profile.experience = [
+    { ...source, id: "untyped", company: "经历单位", title: undefined, employmentType: undefined },
+  ];
+  const decision = decideForField(field("公司名称", { key: "work.company", section: "experience" }), {
+    profile,
+    memory: [],
+    siteKey: "example.com",
+    hiringTrack: "campus",
+    composeEssays: false,
+  });
+
+  assert.equal(decision.status, "review");
+  assert.match(decision.caution ?? "", /没有标明这段经历/);
+});
+
+test("a declared resume track guides experience selection when the page is silent", () => {
+  const profile = profileOf();
+  const template = profile.experience[0] ?? { id: "template", highlights: [] };
+  profile.experience = [
+    { ...template, id: "full-time", company: "正式工作单位", title: "后端开发工程师", employmentType: "全职" },
+    { ...template, id: "internship", company: "实习单位", title: "后端开发实习生", employmentType: "实习" },
+  ];
+
+  profile.preference.targetTrack = "internship";
+  assert.equal(readProfile(profile, "work.company")?.value.text, "实习单位");
+
+  profile.preference.targetTrack = "experienced";
+  assert.equal(readProfile(profile, "work.company")?.value.text, "正式工作单位");
+
+  // A page that states its own track still wins over the resume's declaration.
+  assert.equal(
+    readProfile(profile, "work.company", { hiringTrack: "campus" })?.value.text,
+    "实习单位",
+  );
+});
+
+test("an experience title alone can identify an internship", () => {
+  const profile = profileOf();
+  const source = profile.experience[0] ?? { id: "template", highlights: [] };
+  profile.experience = [
+    { ...source, id: "title-only", company: "实习单位", title: "后端开发实习生", employmentType: undefined },
+  ];
+  assert.equal(readProfile(profile, "work.company", { hiringTrack: "campus" })?.value.text, "实习单位");
+  assert.equal(
+    decideForField(field("公司名称", { key: "work.company", section: "experience" }), {
+      profile,
+      memory: [],
+      siteKey: "example.com",
+      hiringTrack: "campus",
+      composeEssays: false,
+    }).status,
+    "ready",
+  );
+});
+
 test("considerObservation classifies an unrecognised field by its label", () => {
   const result = considerObservation(
     {
@@ -524,6 +899,55 @@ test("considerObservation classifies an unrecognised field by its label", () => 
   );
   assert.equal(result.action, "new");
   assert.equal(result.entry?.key, "identity.relativesInCompany");
+});
+
+test("an unclassifiable question is still learned, under a site-scoped custom key", () => {
+  /*
+   * A company-specific question with no taxonomy key and no resume data to
+   * answer it. The learning engine already had a custom-key path, but the
+   * content watcher filtered out unknown fields before it ran, so the one
+   * kind of field learning exists for was never remembered. (Tencent's AI
+   * questions used to be this kind of field; they now have real keys.)
+   */
+  const label = "你最近在读什么书";
+  const result = considerObservation(
+    {
+      field: field(label, { key: "unknown", kind: "textarea" }),
+      value: "《设计数据密集型应用》",
+      proposedValues: [],
+      siteKey: "careers.tencent.com",
+      at: 2000,
+    },
+    [],
+  );
+  assert.equal(result.action, "new");
+  assert.equal(result.entry?.key, `custom.${normalize(label).slice(0, 40)}`);
+  assert.equal(result.entry?.siteKey, "careers.tencent.com");
+  assert.equal(result.entry?.labelSnapshot, label);
+});
+
+test("a learned custom answer is offered back on the same site", () => {
+  const label = "你最近在读什么书";
+  const memory: MemoryEntry[] = [
+    {
+      id: "m-custom",
+      key: `custom.${normalize(label).slice(0, 40)}`,
+      labelSnapshot: label,
+      value: "《设计数据密集型应用》",
+      origin: "learned",
+      siteKey: "example.com",
+      hits: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      reviewed: false,
+    },
+  ];
+  const candidates = resolveField(
+    field(label, { key: "unknown", kind: "textarea" }),
+    baseContext(profileOf(), memory),
+  );
+  assert.equal(candidates[0]?.value.text, "《设计数据密集型应用》");
+  assert.equal(candidates[0]?.evidence.source, "site-memory");
 });
 
 test("maskValue hides sensitive numbers while keeping their shape", () => {

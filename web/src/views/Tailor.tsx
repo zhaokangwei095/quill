@@ -9,33 +9,36 @@
  * one.
  */
 
-import { useCallback, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import {
+  DEFAULT_MODEL_CONFIG,
+  PROJECT_CATEGORY_LABELS,
   analyzeJd,
-  tailorResume,
+  customModelReady,
   createRecord,
+  detectJobRole,
+  matchDossierForJob,
   type GapItem,
   type JdAnalysis,
+  type Profile,
+  type ProfileDossier,
   type TailorReport,
   type TailoredSection,
 } from "@quill/core";
 import { useWorkbench } from "../state.js";
 import { getStore } from "../data/store.js";
+import { analyzeJdWithUserModel } from "../data/userModel.js";
 import { copyText } from "../data/format.js";
 import { relativeTime } from "../data/format.js";
 import {
-  ArrowRight,
   Check,
   CheckCircle,
   ChevronRight,
   Compass,
   Copy,
-  Download,
   Info,
-  Plus,
   Sparkle,
   Table,
-  Trash,
   Warning,
   X,
 } from "../icons.js";
@@ -49,56 +52,137 @@ export function TailorView({
   onNavigate: (route: string) => void;
   onToast: Toast;
 }): JSX.Element {
-  const { state, reload, patch } = useWorkbench();
+  const { state, reload } = useWorkbench();
   const [text, setText] = useState("");
+  const [role, setRole] = useState("");
+  const [roleEdited, setRoleEdited] = useState(false);
   const [company, setCompany] = useState("");
   const [busy, setBusy] = useState<string | undefined>();
   const [activeAnalysis, setActiveAnalysis] = useState<string | undefined>();
   const [activeReport, setActiveReport] = useState<string | undefined>();
+  const [dossiers, setDossiers] = useState<ProfileDossier[]>([]);
 
-  const hasProfile = Boolean(state.profile?.identity.fullName || state.profile?.contact.email);
+  const hasProfile =
+    dossiers.some((dossier) => hasResumeContent(dossier.profile)) ||
+    Boolean(state.profile && hasResumeContent(state.profile));
+  const customModel = state.settings?.model ?? DEFAULT_MODEL_CONFIG;
+  const userModelReady = customModelReady(customModel);
+
+  const onPasteJobText = useCallback((value: string) => {
+    setText(value);
+    if (roleEdited) return;
+    const detected = detectJobRole(value);
+    setRole(detected?.value ?? "");
+  }, [roleEdited]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getStore()
+      .loadProfileDossiers()
+      .then((items) => {
+        if (!cancelled) setDossiers(items);
+      })
+      .catch(() => {
+        // A missing dossier collection falls back to the workbench's current profile.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.profile?.updatedAt, state.profiles.length, state.activeProfileId]);
+
+  const jobTextFor = useCallback(
+    (analysis: JdAnalysis): string =>
+      [
+        analysis.role,
+        ...analysis.requirements.map((item) => item.text),
+        ...analysis.keywords,
+        ...analysis.sections.map((section) => section.body),
+      ].join("\n"),
+    [],
+  );
 
   /** Analyse the pasted posting. */
   const runAnalysis = useCallback(async () => {
     if (!text.trim()) return;
-    setBusy("正在解析岗位描述…");
+    setBusy(userModelReady ? "正在用自定义模型解析…" : "正在解析岗位描述…");
+    const meta = {
+      ...(company ? { company } : {}),
+      ...(role.trim() ? { role: role.trim() } : {}),
+    };
+    let notice: string | undefined;
     try {
-      const analysis = await getStore().saveAnalysis(text, company ? { company } : {});
+      let analysis: JdAnalysis;
+      if (userModelReady) {
+        try {
+          analysis = await analyzeJdWithUserModel(text, meta, customModel);
+        } catch (error) {
+          notice = error instanceof Error ? error.message : "自定义模型解析失败";
+          analysis = analyzeJd(text, meta);
+        }
+      } else {
+        analysis = analyzeJd(text, meta);
+      }
+      const saved = await getStore().saveAnalysisResult(analysis);
       await reload();
-      setActiveAnalysis(analysis.id);
+      setActiveAnalysis(saved.id);
       setText("");
-      onToast(`已解析：${analysis.role}`, "success");
+      setRole("");
+      setRoleEdited(false);
+      onToast(
+        notice
+          ? `自定义模型没有完成解析（${notice}），已改用本机规则`
+          : userModelReady
+            ? `已用自定义模型解析：${saved.role}`
+            : `已解析：${saved.role}`,
+        notice ? "neutral" : "success",
+      );
     } catch (error) {
       onToast(error instanceof Error ? error.message : "解析失败", "error");
     } finally {
       setBusy(undefined);
     }
-  }, [company, onToast, reload, text]);
+  }, [company, customModel, onToast, reload, role, text, userModelReady]);
 
-  /** Produce the tailored report for an analysis. */
+  /** Produce the tailored report from the direction that best matches the job. */
   const runTailor = useCallback(
     async (analysis: JdAnalysis) => {
-      if (!state.profile) {
+      if (!hasProfile && !state.profile) {
         onToast("请先上传简历", "error");
         return;
       }
-      setBusy("正在对照岗位重写简历…");
+      setBusy("正在匹配方向简历并生成建议…");
       try {
-        const report = tailorResume(state.profile, analysis, {
-          ...(analysis.company ? { company: analysis.company } : {}),
-          maxBullets: 3,
-        });
-        await getStore().saveReport(report);
+        const report = await getStore().tailor(analysis.id);
         await reload();
         setActiveReport(report.id);
-        onToast("已生成针对性建议", "success");
+        onToast(
+          report.dossierName
+            ? `已按岗位匹配「${report.dossierName}」方向简历`
+            : "已生成针对性建议",
+          "success",
+        );
       } catch (error) {
         onToast(error instanceof Error ? error.message : "生成失败", "error");
       } finally {
         setBusy(undefined);
       }
     },
-    [onToast, reload, state.profile],
+    [hasProfile, onToast, reload, state.profile],
+  );
+
+  /** Persist a person-selected experience swap in this tailored report only. */
+  const updateReport = useCallback(
+    async (report: TailorReport) => {
+      try {
+        await getStore().saveReport(report);
+        await reload();
+        onToast("已更新简历建议；资料库与求职信草稿未改动", "success");
+      } catch (error) {
+        onToast(error instanceof Error ? `保存替换结果失败：${error.message}` : "保存替换结果失败", "error");
+        throw error;
+      }
+    },
+    [onToast, reload],
   );
 
   /** Copy a plain-text resume built from the tailored sections. */
@@ -123,10 +207,6 @@ export function TailorView({
     [onToast, state.analyses],
   );
 
-  const activeAnalysisData = useMemo(
-    () => state.analyses.find((item) => item.id === activeAnalysis),
-    [activeAnalysis, state.analyses],
-  );
   const activeReportData = useMemo(
     () => state.reports.find((item) => item.id === activeReport),
     [activeReport, state.reports],
@@ -135,10 +215,10 @@ export function TailorView({
   return (
     <div className="q-page">
       <header className="q-page-head q-reveal">
-        <h1 className="q-page-title">针对一个具体岗位，重写你的简历。</h1>
+        <h1 className="q-page-title">针对一个具体岗位，重写最匹配的那份简历。</h1>
         <p className="q-page-lead">
-          Quill 从岗位描述里提取要求，对照你的经历排出优先级，并给出可读的改写建议。
-          它只重排与重述你已经写下的事实，不会替你添加任何没有的经历。
+          粘贴岗位描述后，Quill 会按岗位名称和任职要求，从各方向简历中选出最相关的一份来生成建议；
+          每条改写都保留原文与理由，不会添加你没有的经历。
         </p>
       </header>
 
@@ -148,7 +228,7 @@ export function TailorView({
           <div>
             <div className="q-insight-title">需要先有一份简历</div>
             <div className="q-insight-detail">
-              岗位分析可以先做，但生成针对性建议需要简历资料。
+              每个方向有自己的简历。可以先解析岗位，但生成建议前需要上传至少一份方向简历。
               <button
                 type="button"
                 className="q-btn q-btn-ghost q-btn-sm"
@@ -172,10 +252,26 @@ export function TailorView({
               value={text}
               placeholder={"把招聘启事整段粘贴进来即可，包括岗位职责、任职要求、加分项。\n\n例如：\n任职要求\n1. 本科及以上学历，计算机相关专业\n2. 3 年以上后端开发经验，精通 Go 或 Java\n3. 熟悉 MySQL、Redis、Kafka 等常用中间件"}
               style={{ minHeight: "11rem" }}
-              onChange={(event) => setText(event.target.value)}
+              onChange={(event) => onPasteJobText(event.target.value)}
             />
             <span className="q-hint">
               保留原本的分段与编号，识别会更准确。共 {text.length} 字。
+            </span>
+          </div>
+          <div className="q-field-group" style={{ marginBottom: "var(--s-4)" }}>
+            <span className="q-label">岗位名称</span>
+            <input
+              className="q-input q-job-name-input"
+              value={role}
+              maxLength={40}
+              placeholder="例如：高级后端开发工程师 / 产品经理实习生"
+              onChange={(event) => {
+                setRole(event.target.value);
+                setRoleEdited(Boolean(event.target.value.trim()));
+              }}
+            />
+            <span className="q-hint">
+              粘贴上方岗位描述时，若其中有「岗位名称 / 招聘职位」或职位标题，会自动填到这里；也可以手动修改。
             </span>
           </div>
 
@@ -197,6 +293,12 @@ export function TailorView({
               {busy ?? "解析这个岗位"}
             </button>
           </div>
+          {userModelReady && (
+            <p className="q-hint" style={{ marginTop: "var(--s-3)" }}>
+              岗位描述会发送到你配置的自定义模型 {endpointHost(customModel.baseUrl)} 解析；API Key
+              只保存在本机。模型不可用时会自动退回本机规则。
+            </p>
+          )}
         </div>
       </section>
 
@@ -213,6 +315,7 @@ export function TailorView({
             {state.analyses.map((analysis) => {
               const report = state.reports.find((item) => item.jdAnalysisId === analysis.id);
               const open = activeAnalysis === analysis.id;
+              const match = matchForAnalysis(analysis, dossiers, state.activeProfileId, jobTextFor(analysis));
               return (
                 <div key={analysis.id}>
                   <button
@@ -232,6 +335,7 @@ export function TailorView({
                       <span className="q-cap">
                         {analysis.company ? `${analysis.company} · ` : ""}
                         {analysis.requirements.length} 项要求 · {relativeTime(analysis.createdAt)}
+                        {match.dossier ? ` · 匹配方向：${match.dossier.name}` : ""}
                       </span>
                     </span>
                     {report ? (
@@ -289,6 +393,15 @@ export function TailorView({
                           </>
                         )}
                       </div>
+                      {match.dossier ? (
+                        <p className="q-hint" style={{ marginBottom: "var(--s-4)" }}>
+                          将按岗位自动使用「{match.dossier.name}」方向的简历生成建议；不会改动工作台当前编辑的方向。
+                        </p>
+                      ) : (
+                        <p className="q-hint" style={{ marginBottom: "var(--s-4)" }}>
+                          暂无可匹配的方向简历，请先在工作台上传至少一份方向简历。
+                        </p>
+                      )}
 
                       <RequirementList analysis={analysis} />
                     </div>
@@ -331,6 +444,7 @@ export function TailorView({
                     </span>
                     <span className="q-cap">
                       {analysis?.company ? `${analysis.company} · ` : ""}
+                      {report.dossierName ? `${report.dossierName}方向 · ` : ""}
                       {report.gaps.filter((gap) => gap.verdict === "gap").length} 项缺口 ·{" "}
                       {relativeTime(report.createdAt)}
                     </span>
@@ -355,10 +469,13 @@ export function TailorView({
 
       {activeReportData && (
         <ReportSheet
+          key={activeReportData.id}
           report={activeReportData}
+          profile={profileForReport(activeReportData, dossiers, state.profile)}
           analysis={state.analyses.find((item) => item.id === activeReportData.jdAnalysisId)}
           onClose={() => setActiveReport(undefined)}
-          onCopy={() => void exportReport(activeReportData)}
+          onUpdate={updateReport}
+          onCopy={(report) => void exportReport(report)}
         />
       )}
     </div>
@@ -366,6 +483,48 @@ export function TailorView({
 }
 
 /* ----------------------------------------------------------- components */
+
+function profileForReport(
+  report: TailorReport,
+  dossiers: ProfileDossier[],
+  current: Profile | undefined,
+): Profile | undefined {
+  return (
+    dossiers.find((dossier) => dossier.id === report.dossierId)?.profile ??
+    dossiers.find((dossier) => dossier.profile.id === report.profileId)?.profile ??
+    current
+  );
+}
+
+function hasResumeContent(profile: Profile): boolean {
+  return Boolean(
+    profile.identity.fullName ||
+      profile.contact.email ||
+      profile.education.length > 0 ||
+      profile.experience.length > 0 ||
+      profile.projects.length > 0,
+  );
+}
+
+function matchForAnalysis(
+  analysis: JdAnalysis,
+  dossiers: ProfileDossier[],
+  activeProfileId: string | undefined,
+  jobText: string,
+): ReturnType<typeof matchDossierForJob> {
+  return matchDossierForJob(dossiers, activeProfileId, {
+    jobRole: analysis.role,
+    jobText,
+  });
+}
+
+function endpointHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
+}
 
 function RequirementList({ analysis }: { analysis: JdAnalysis }): JSX.Element {
   const must = analysis.requirements.filter((requirement) => requirement.mustHave);
@@ -439,16 +598,57 @@ function RequirementList({ analysis }: { analysis: JdAnalysis }): JSX.Element {
 
 function ReportSheet({
   report,
+  profile,
   analysis,
   onClose,
+  onUpdate,
   onCopy,
 }: {
   report: TailorReport;
+  profile?: Profile;
   analysis: JdAnalysis | undefined;
   onClose: () => void;
-  onCopy: () => void;
+  onUpdate: (report: TailorReport) => Promise<void>;
+  onCopy: (report: TailorReport) => void;
 }): JSX.Element {
   const [tab, setTab] = useState<"resume" | "gaps" | "letter" | "interview">("resume");
+  const [workingReport, setWorkingReport] = useState(report);
+  const [candidatePool] = useState(report.sections);
+  const [swapPending, setSwapPending] = useState(false);
+
+  const replaceSection = async (sectionIndex: number, replacement: TailoredSection): Promise<void> => {
+    if (swapPending) return;
+    const replacementIndex = candidatePool.findIndex(
+      (section) => section.entityId && section.entityId === replacement.entityId,
+    );
+    const current = workingReport.sections[sectionIndex];
+    if (!current || replacementIndex < 0 || current.entityId === replacement.entityId) return;
+
+    // Swap the selected entry into this position and remove its previous copy
+    // so the tailored output does not list the same experience twice.
+    const sections = [...workingReport.sections];
+    const currentIndex = sections.findIndex((section) => section.entityId === current.entityId);
+    if (currentIndex < 0) return;
+    const candidate = candidatePool[replacementIndex];
+    if (!candidate) return;
+    const removeCandidateAt = sections.findIndex((section) => section.entityId === candidate.entityId);
+    if (removeCandidateAt < 0) return;
+
+    sections.splice(removeCandidateAt, 1);
+    const adjustedCurrentIndex = removeCandidateAt < currentIndex ? currentIndex - 1 : currentIndex;
+    sections.splice(adjustedCurrentIndex, 1, candidate);
+
+    const next = { ...workingReport, sections };
+    setSwapPending(true);
+    try {
+      await onUpdate(next);
+      setWorkingReport(next);
+    } catch {
+      // The parent reports the persistence error; keep the displayed report.
+    } finally {
+      setSwapPending(false);
+    }
+  };
 
   return (
     <>
@@ -460,10 +660,12 @@ function ReportSheet({
               {analysis?.role ?? "针对性建议"}
             </div>
             <div className="q-cap">
-              {analysis?.company ? `${analysis.company} · ` : ""}覆盖 {Math.round(report.coverage * 100)}%
+              {analysis?.company ? `${analysis.company} · ` : ""}
+              {workingReport.dossierName ? `${workingReport.dossierName}方向 · ` : ""}
+              覆盖 {Math.round(workingReport.coverage * 100)}%
             </div>
           </div>
-          <button type="button" className="q-icon-btn" onClick={onCopy} aria-label="复制文本">
+          <button type="button" className="q-icon-btn" onClick={() => onCopy(workingReport)} aria-label="复制文本">
             <Copy size={16} />
           </button>
           <button type="button" className="q-icon-btn" onClick={onClose} aria-label="关闭">
@@ -477,10 +679,10 @@ function ReportSheet({
               一句话定位
             </div>
             <p style={{ fontSize: "var(--text-lead)", lineHeight: "var(--leading-lead)", letterSpacing: "var(--tracking-lead)" }}>
-              {report.headline}
+              {workingReport.headline}
             </p>
             <p className="q-sub" style={{ marginTop: "var(--s-3)" }}>
-              {report.summary}
+              {workingReport.summary}
             </p>
           </div>
 
@@ -488,7 +690,7 @@ function ReportSheet({
             {(
               [
                 ["resume", "简历建议"],
-                ["gaps", `缺口 ${report.gaps.filter((gap) => gap.verdict !== "matched").length}`],
+                ["gaps", `缺口 ${workingReport.gaps.filter((gap) => gap.verdict !== "matched").length}`],
                 ["letter", "求职信"],
                 ["interview", "面试准备"],
               ] as const
@@ -499,16 +701,24 @@ function ReportSheet({
             ))}
           </div>
 
-          {tab === "resume" && <TailoredSections sections={report.sections} />}
-          {tab === "gaps" && <GapList gaps={report.gaps} />}
+          {tab === "resume" && (
+            <TailoredSections
+              sections={workingReport.sections}
+              candidatePool={candidatePool}
+              profile={profile}
+              onReplace={replaceSection}
+              disabled={swapPending}
+            />
+          )}
+          {tab === "gaps" && <GapList gaps={workingReport.gaps} />}
           {tab === "letter" && (
             <div className="q-prose" style={{ whiteSpace: "pre-wrap" }}>
-              {report.coverLetter}
+              {workingReport.coverLetter}
               <button
                 type="button"
                 className="q-btn q-btn-outline"
                 style={{ marginTop: "var(--s-5)" }}
-                onClick={() => void copyText(report.coverLetter)}
+                onClick={() => void copyText(workingReport.coverLetter)}
               >
                 <Copy size={15} />
                 复制求职信
@@ -521,13 +731,13 @@ function ReportSheet({
                 这些问题来自你在岗位要求上的缺口，是面试中最可能被追问的部分。
               </p>
               <ol style={{ display: "flex", flexDirection: "column", gap: "var(--s-3)" }}>
-                {report.interviewPrompts.map((prompt, index) => (
+                {workingReport.interviewPrompts.map((prompt, index) => (
                   <li className="q-bullet" key={index} style={{ display: "flex", gap: "var(--s-3)" }}>
                     <span className="q-step-num">{String(index + 1).padStart(2, "0")}</span>
                     <span>{prompt}</span>
                   </li>
                 ))}
-                {report.interviewPrompts.length === 0 && <li className="q-sub">没有发现明显的缺口。</li>}
+                {workingReport.interviewPrompts.length === 0 && <li className="q-sub">没有发现明显的缺口。</li>}
               </ol>
             </div>
           )}
@@ -537,38 +747,186 @@ function ReportSheet({
   );
 }
 
-function TailoredSections({ sections }: { sections: TailoredSection[] }): JSX.Element {
+interface SectionAlternative {
+  section: TailoredSection;
+  kindLabel: string;
+  matchedKeywords: string[];
+  evidence: string;
+}
+
+function sectionAlternatives(
+  current: TailoredSection,
+  candidatePool: TailoredSection[],
+  visibleSections: TailoredSection[],
+  profile: Profile | undefined,
+  minKeywordCount: number,
+): SectionAlternative[] {
+  if (!profile || !current.entityId) return [];
+  const visibleIds = new Set(visibleSections.map((section) => section.entityId).filter(Boolean));
+
+  return candidatePool
+    .filter(
+      (section) =>
+        section.entityId &&
+        section.entityId !== current.entityId &&
+        visibleIds.has(section.entityId),
+    )
+    .map((section): SectionAlternative | undefined => {
+      const experience = profile.experience.find((item) => item.id === section.entityId);
+      const project = profile.projects.find((item) => item.id === section.entityId);
+      if (!experience && !project) return undefined;
+
+      const matchedBullets = section.bullets
+        .filter((bullet) => bullet.answers.length > 0)
+        .sort((left, right) => right.answers.length - left.answers.length);
+      const matchedKeywords = [...new Set(matchedBullets.flatMap((bullet) => bullet.answers))];
+      const evidence = matchedBullets[0]?.text;
+      if (matchedKeywords.length <= minKeywordCount || !evidence) return undefined;
+
+      let kindLabel = "工作经历";
+      if (project) {
+        kindLabel = project.category
+          ? `${PROJECT_CATEGORY_LABELS[project.category]}`
+          : "项目经历";
+      } else if (
+        /实习|intern/i.test(`${experience?.employmentType ?? ""} ${experience?.title ?? ""}`)
+      ) {
+        kindLabel = "实习经历";
+      }
+
+      return { section, kindLabel, matchedKeywords, evidence };
+    })
+    .filter((item): item is SectionAlternative => item !== undefined)
+    .sort(
+      (left, right) =>
+        right.matchedKeywords.length - left.matchedKeywords.length ||
+        right.section.bullets.reduce((sum, bullet) => sum + bullet.answers.length, 0) -
+          left.section.bullets.reduce((sum, bullet) => sum + bullet.answers.length, 0),
+    )
+    .slice(0, 3);
+}
+
+function TailoredSections({
+  sections,
+  candidatePool,
+  profile,
+  onReplace,
+  disabled,
+}: {
+  sections: TailoredSection[];
+  candidatePool: TailoredSection[];
+  profile?: Profile;
+  onReplace: (index: number, replacement: TailoredSection) => void;
+  disabled: boolean;
+}): JSX.Element {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--s-6)" }}>
-      {sections.map((section, index) => (
-        <section key={`${section.heading}-${index}`}>
-          <div style={{ marginBottom: "var(--s-3)" }}>
-            <div style={{ fontSize: "var(--text-title)", fontWeight: 600, letterSpacing: "-0.01em" }}>
-              {section.heading}
+      {sections.map((section, index) => {
+        const isExperienceOrProject = Boolean(
+          profile?.experience.some((item) => item.id === section.entityId) ||
+            profile?.projects.some((item) => item.id === section.entityId),
+        );
+        const lowMatchCount = section.bullets.filter((bullet) => bullet.answers.length === 0).length;
+        const matchedKeywordCount = new Set(section.bullets.flatMap((bullet) => bullet.answers)).size;
+        const hasAnyMatch = matchedKeywordCount > 0;
+        const alternatives =
+          isExperienceOrProject && lowMatchCount > 0
+            ? sectionAlternatives(
+                section,
+                candidatePool,
+                sections,
+                profile,
+                matchedKeywordCount,
+              )
+            : [];
+
+        return (
+          <section key={`${section.entityId ?? section.heading}-${index}`}>
+            <div style={{ marginBottom: "var(--s-3)" }}>
+              <div style={{ fontSize: "var(--text-title)", fontWeight: 600, letterSpacing: "-0.01em" }}>
+                {section.heading}
+              </div>
+              {section.meta && <div className="q-cap">{section.meta}</div>}
             </div>
-            {section.meta && <div className="q-cap">{section.meta}</div>}
-          </div>
-          <div>
-            {section.bullets.map((bullet, bulletIndex) => (
-              <div className="q-bullet" key={bulletIndex}>
-                {bullet.source && bullet.source !== bullet.text && (
-                  <>
-                    <div className="q-bullet-source">
-                      <span>原文</span>
+            <div>
+              {section.bullets.map((bullet, bulletIndex) => (
+                <div className="q-bullet" key={bulletIndex}>
+                  {bullet.source && bullet.source !== bullet.text && (
+                    <>
+                      <div className="q-bullet-source">
+                        <span>原文</span>
+                      </div>
+                      <div className="q-bullet-original">{bullet.source}</div>
+                    </>
+                  )}
+                  <div className="q-bullet-tailored">{bullet.text}</div>
+                  <div className="q-bullet-note">
+                    <Check size={11} style={{ verticalAlign: "-1px", marginRight: "0.25rem" }} />
+                    {bullet.note}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {isExperienceOrProject && lowMatchCount > 0 && (
+              <div className="q-insight" data-kind="warning" style={{ marginTop: "var(--s-4)" }}>
+                <Info size={16} />
+                <div className="q-grow">
+                  <div className="q-insight-title">
+                    {hasAnyMatch ? "这段经历有内容与岗位关键词重合度低" : "这段经历与岗位关键词重合度低"}
+                  </div>
+                  <div className="q-insight-detail">
+                    {lowMatchCount} 条内容没有直接命中岗位关键词，{hasAnyMatch ? `另有 ${matchedKeywordCount} 个岗位词命中` : "当前先保留原文"}。
+                    {alternatives.length > 0
+                      ? " 可以参考下面命中更多岗位词的真实经历。换入会替换本次建议里的整段经历，不会改动资料库或求职信草稿。"
+                      : " 目前没有找到命中岗位词更多的其他工作、实习或项目经历，可以核对岗位要求或继续保留原文。"}
+                  </div>
+
+                  {alternatives.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--s-2)", marginTop: "var(--s-3)" }}>
+                      {alternatives.map((alternative) => (
+                        <div
+                          key={alternative.section.entityId}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "var(--s-3)",
+                            flexWrap: "wrap",
+                            padding: "var(--s-3)",
+                            borderRadius: "var(--r-md)",
+                            background: "var(--bg-sunken)",
+                          }}
+                        >
+                          <div className="q-grow" style={{ minWidth: "12rem" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "var(--s-2)", flexWrap: "wrap" }}>
+                              <span className="q-chip q-chip-accent">{alternative.kindLabel}</span>
+                              <span className="q-strong">{alternative.section.heading}</span>
+                            </div>
+                            <div className="q-cap" style={{ marginTop: "var(--s-2)" }}>
+                              {alternative.evidence}
+                            </div>
+                            <div className="q-cap" style={{ marginTop: "var(--s-1)" }}>
+                              命中：{alternative.matchedKeywords.slice(0, 4).join("、")}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="q-btn q-btn-outline q-btn-sm"
+                            disabled={disabled}
+                            onClick={() => onReplace(index, alternative.section)}
+                          >
+                            {disabled ? "正在替换…" : "换入并替换此段"}
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                    <div className="q-bullet-original">{bullet.source}</div>
-                  </>
-                )}
-                <div className="q-bullet-tailored">{bullet.text}</div>
-                <div className="q-bullet-note">
-                  <Check size={11} style={{ verticalAlign: "-1px", marginRight: "0.25rem" }} />
-                  {bullet.note}
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-      ))}
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }
